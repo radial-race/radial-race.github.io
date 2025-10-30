@@ -120,7 +120,7 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    const LANE_COUNT = 8; // **MODIFIED:** Increased lane count from 4 to 8
+    const LANE_COUNT = 8; 
     const ROAD_WIDTH = 6;
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
     // >> START ADDITION: TRUCK SIZE
@@ -147,13 +147,19 @@
     const DETAIL_COUNT = 40; 
     
     // Traffic Intensity (ADJUSTED for smoother difficulty ramp)
-    const BASE_SPAWN_INTERVAL = 0.55; // Increased from 0.45 
-    const TRAFFIC_MULTIPLIER = 1.20; // Reduced from 1.35 (slower difficulty ramp)
+    const BASE_SPAWN_INTERVAL = 0.55; 
+    const TRAFFIC_MULTIPLIER = 1.20; 
     
     // **ADJUSTED:** Minimum required Z-gap for the longitudinal buffer (3.5 car lengths)
     const MIN_LONGITUDINAL_GAP = CAR_SIZE.depth * 3.5; 
     // **ADJUSTED:** Minimum required Z-gap for the lateral buffer (1.2 car lengths)
     const MIN_LATERAL_GAP = CAR_SIZE.depth * 1.2; 
+    
+    // >> START ADDITION: NPC AI CONSTANTS
+    const NPC_LANE_CHANGE_COOLDOWN = 3.0; // Seconds between lane change *attempts*
+    const NPC_CRITICAL_DISTANCE = CAR_SIZE.depth * 4; // Distance to an obstacle to trigger evasion
+    const NPC_LANE_SHIFT_SPEED = 6.0; // Rate at which NPCs move laterally
+    // >> END ADDITION
 
     // --- ENVIRONMENT PRESETS ---
     const ENVIRONMENTS = [
@@ -691,15 +697,22 @@
         
         // Check which size we used to adjust the spawn position correctly
         const carDepth = carMesh.userData.collisionDepth;
-        
+        const initialX = gameState.playerCar.lanePositions[lane];
+
         carMesh.position.set(
-            gameState.playerCar.lanePositions[lane], 
+            initialX, 
             0, 
             FAR_Z_SPAWN + carDepth / 2 + Math.random() * 20 
         );
 
-        carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
-        
+        // >> START UPDATE: Add AI-related properties to NPC traffic car
+        carMesh.userData.lane = lane;
+        carMesh.userData.targetX = initialX; 
+        carMesh.userData.moveSpeed = NPC_LANE_SHIFT_SPEED; 
+        carMesh.userData.laneChangeCooldown = Math.random() * NPC_LANE_CHANGE_COOLDOWN; 
+        carMesh.userData.isChangingLane = false; 
+        // >> END UPDATE
+
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
     }
@@ -719,8 +732,6 @@
         );
         
         // We only check for cars in the same lane (longitudinal separation). 
-        // The previous adjacent-lane and 'all lanes blocked' checks were too strict
-        // and caused the spawning deadlock/bug, especially with 8 lanes.
         for (const car of relevantTraffic) {
             const carZ = car.position.z;
             // Get the car's collision depth dynamically
@@ -742,6 +753,127 @@
         
         return true; 
     }
+
+    // >> START ADDITION: NPC AI FUNCTIONS
+
+    /** * Checks if an NPC car can safely move to a new lane.
+     * It checks for cars in the target lane that are too close in front OR behind.
+     */
+    function isLaneShiftSafe(carToMove, targetLane, trafficByLane) {
+        const carZ = carToMove.position.z;
+        const carDepth = carToMove.userData.collisionDepth || CAR_SIZE.depth;
+        
+        // Check against all cars (including player) in the target lane
+        for (const otherCar of trafficByLane[targetLane]) {
+            if (otherCar === carToMove) continue; // Skip itself
+            
+            const otherCarZ = otherCar.position.z;
+            const otherCarDepth = otherCar.userData.collisionDepth || CAR_SIZE.depth;
+            
+            // We need a gap in Z greater than a minimum required clearance
+            const requiredGap = Math.max(carDepth, otherCarDepth) * 1.5; 
+
+            if (Math.abs(carZ - otherCarZ) < requiredGap) {
+                return false; // Collision risk in the lateral direction
+            }
+        }
+        
+        return true;
+    }
+    
+    /** Handles lateral movement and decision-making for all traffic cars. */
+    function updateTrafficAI(deltaTime) {
+        const { traffic, playerCar } = gameState;
+        
+        // 1. Index all cars (NPCs and Player) by lane for quick lookup
+        const trafficByLane = Array.from({ length: LANE_COUNT }, () => []);
+        
+        // Prepare player car data for collision check
+        const playerCarData = {
+            position: { x: playerCar.currentX, z: PLAYER_Z },
+            userData: { collisionDepth: CAR_SIZE.depth, lane: playerCar.lane, isPlayer: true }
+        };
+
+        const allCars = [...traffic, playerCarData];
+        
+        for (const car of allCars) {
+            // Filter out cars too far back or too far forward
+            if (car.position.z < FAR_Z_SPAWN + 20 || car.position.z > DESPAWN_Z - 5) continue;
+            trafficByLane[car.userData.lane].push(car);
+        }
+        
+        // Sort cars in each lane by Z position (closest to player first/highest Z)
+        trafficByLane.forEach(laneCars => {
+            laneCars.sort((a, b) => b.position.z - a.position.z);
+        });
+
+        // 2. Process each NPC car's AI
+        for (const npcCar of traffic) {
+            const currentLane = npcCar.userData.lane;
+            
+            // A. Lateral Movement (Smooth shifting)
+            const currentX = npcCar.position.x;
+            const targetX = npcCar.userData.targetX;
+            if (currentX !== targetX) {
+                npcCar.position.x += (targetX - currentX) * npcCar.userData.moveSpeed * deltaTime;
+                
+                // If close enough, snap to targetX and clear the changing lane flag
+                if (Math.abs(npcCar.position.x - targetX) < 0.05) {
+                    npcCar.position.x = targetX;
+                    npcCar.userData.isChangingLane = false;
+                }
+            } else {
+                 npcCar.userData.isChangingLane = false;
+            }
+
+            // B. AI Decision Logic
+            npcCar.userData.laneChangeCooldown -= deltaTime;
+            if (npcCar.userData.isChangingLane || npcCar.userData.laneChangeCooldown > 0) {
+                continue; // Skip decision logic if already shifting or on cooldown
+            }
+            
+            // C. Find the car directly in front
+            let carInFront = null;
+            for (const car of trafficByLane[currentLane]) {
+                if (car === npcCar) continue;
+                // Car is in front (higher Z) and within evasion range
+                if (car.position.z > npcCar.position.z) {
+                    // Only check cars within the critical distance
+                    if (car.position.z - npcCar.position.z < NPC_CRITICAL_DISTANCE) {
+                        carInFront = car;
+                        break;
+                    }
+                }
+            }
+            
+            // D. Evasion Check and Lane Shift Initiation
+            if (carInFront) {
+                
+                // Try to find a safe lane to shift to (random direction preference for variety)
+                const directions = [1, -1]; // Right, Left
+                if (Math.random() < 0.5) directions.reverse();
+
+                for (const direction of directions) {
+                    const targetLane = currentLane + direction;
+
+                    // Check bounds
+                    if (targetLane >= 0 && targetLane < LANE_COUNT) {
+                        if (isLaneShiftSafe(npcCar, targetLane, trafficByLane)) {
+                            
+                            // Initiate lane change
+                            npcCar.userData.lane = targetLane;
+                            npcCar.userData.targetX = playerCar.lanePositions[targetLane];
+                            npcCar.userData.isChangingLane = true;
+                            // Reset cooldown for a short period
+                            npcCar.userData.laneChangeCooldown = NPC_LANE_CHANGE_COOLDOWN; 
+                            break; 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // >> END ADDITION: NPC AI FUNCTIONS
 
 
     /** Moves and wraps all dynamic elements to create the infinite road effect. */
@@ -771,10 +903,15 @@
         const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
         const roadMoveDistance = playerSpeedUnits * deltaTime;
         
+        // >> START ADDITION: Update NPC AI movement before Z-axis movement
+        updateTrafficAI(deltaTime); 
+        // >> END ADDITION
+
         // 4. Move and Check Traffic Cars
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
+            // NOTE: carMesh.position.x is now updated in updateTrafficAI
             carMesh.position.z += trafficRelativeMoveDistance; 
             
             if (checkCollision(playerCar.mesh, carMesh)) {
@@ -888,6 +1025,7 @@
         const trafficHalfDepth = trafficCollisionDepth / 2; 
 
         // 1. X-axis overlap check (simple check for same lane)
+        // Use position.x for both player (currentX) and NPC (position.x is updated by AI)
         const playerMinX = player.position.x - halfWidth * 0.9; 
         const playerMaxX = player.position.x + halfWidth * 0.9;
         const trafficMinX = trafficMesh.position.x - halfWidth * 0.9;
