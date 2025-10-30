@@ -120,8 +120,8 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    // >> START MODIFICATION: 8 LANE HIGHWAY
-    const LANE_COUNT = 8; 
+    // >> START MODIFICATION: Set to 8 Lanes
+    const LANE_COUNT = 8;
     const ROAD_WIDTH = 12; // Doubled to keep lane width realistic (1.5 units/lane)
     // >> END MODIFICATION
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
@@ -169,9 +169,6 @@
     // --- GAME STATE ---
     let gameState = {
         score: 0,
-        // >> START ADDITION: High Score Tracking
-        highScore: 0,
-        // >> END ADDITION
         level: 1,
         playerSpeedUnits: BASE_IDLE_PLAYER_SPEED,
         isGameOver: false,
@@ -371,39 +368,6 @@
 
     // >> END ADDITION: New Car Geometries
 
-    // >> START ADDITION: Billboard Detail
-    /** Creates a simple wrapping billboard mesh for roadside detail. */
-    function createBillboardMesh() {
-        const detailGroup = new THREE.Group();
-        detailGroup.userData.isBackgroundElement = true;
-        
-        // Pole (Trunk)
-        const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, 2.5, 4);
-        const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.8 }); 
-        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-        pole.position.y = 1.25; 
-        detailGroup.add(pole);
-
-        // Sign Board
-        const signGeometry = new THREE.BoxGeometry(2, 1.2, 0.1);
-        const signMaterial = new THREE.MeshStandardMaterial({ 
-            color: [0x3498db, 0xe74c3c, 0xf1c40f, 0x1abc9c][Math.floor(Math.random() * 4)],
-            metalness: 0,
-            roughness: 0.5
-        });
-        const sign = new THREE.Mesh(signGeometry, signMaterial);
-        sign.position.y = 2.5; 
-        sign.position.z = -0.5; // Slightly offset for perspective
-        detailGroup.add(sign);
-        
-        detailGroup.children.forEach(child => {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        });
-        return detailGroup;
-    }
-    // >> END ADDITION: Billboard Detail
-
 
     /** Creates a background foliage mesh (tree, flower, or none). */
     function createBackgroundMesh(style, grassColor) {
@@ -525,10 +489,11 @@
         // Camera setup
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
-        camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
-        // Slightly higher camera angle for better road visibility
-        // Camera position is adjusted slightly wider for the 8-lane road
-        camera.position.set(0, 3.0, PLAYER_Z + 4.0); 
+        // >> START FIX: Increased FOV to 85 for a wider view, making all 8 lanes clearly visible
+        camera = new THREE.PerspectiveCamera(85, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
+        // Camera position is adjusted slightly higher and further back for the 8-lane road
+        camera.position.set(0, 3.5, PLAYER_Z + 5.0); 
+        // >> END FIX
         camera.lookAt(0, 0.5, 0); // Look slightly down
 
         // Renderer setup
@@ -552,8 +517,9 @@
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 1024;
         directionalLight.shadow.mapSize.height = 1024;
-        directionalLight.shadow.camera.left = -ROAD_WIDTH; // Adjusted for wider road
-        directionalLight.shadow.camera.right = ROAD_WIDTH; // Adjusted for wider road
+        // Adjusted for wider road
+        directionalLight.shadow.camera.left = -ROAD_WIDTH;
+        directionalLight.shadow.camera.right = ROAD_WIDTH;
         directionalLight.shadow.camera.top = 10;
         directionalLight.shadow.camera.bottom = -10;
         directionalLight.shadow.camera.near = 1;
@@ -618,6 +584,7 @@
 
         // 3. Left Railing
         const leftRailing = new THREE.Mesh(railingGeometry, railingMaterial);
+        // Adjusted for wider road: -ROAD_WIDTH / 2 - 0.5 = -12/2 - 0.5 = -6.5
         leftRailing.position.set(-ROAD_WIDTH / 2 - 0.5, 0.2, -ROAD_DEPTH / 2 + PLAYER_Z);
         leftRailing.receiveShadow = true;
         leftRailing.castShadow = true;
@@ -626,6 +593,7 @@
         
         // 4. Right Railing
         const rightRailing = new THREE.Mesh(railingGeometry, railingMaterial);
+        // Adjusted for wider road: ROAD_WIDTH / 2 + 0.5 = 12/2 + 0.5 = 6.5
         rightRailing.position.set(ROAD_WIDTH / 2 + 0.5, 0.2, -ROAD_DEPTH / 2 + PLAYER_Z);
         rightRailing.receiveShadow = true;
         rightRailing.castShadow = true;
@@ -635,46 +603,6 @@
     }
 
     // --- GAME LOGIC FUNCTIONS ---
-    
-    // >> START ADDITION: High Score & Keybinding Persistence
-    
-    /** Loads keybindings and high score from local storage. */
-    function loadGameState() {
-        // Load High Score
-        const savedScore = localStorage.getItem('radialRacerHighScore');
-        if (savedScore) {
-            gameState.highScore = parseInt(savedScore, 10);
-        }
-
-        // Load Keybindings
-        const savedBindings = localStorage.getItem('radialRacerKeyBindings');
-        if (savedBindings) {
-            try {
-                const bindings = JSON.parse(savedBindings);
-                // Merge with defaults to ensure all keys are present
-                gameState.keyBindings = { ...gameState.keyBindings, ...bindings };
-            } catch (e) {
-                console.error("Error loading keybindings from localStorage", e);
-            }
-        }
-    }
-
-    /** Saves keybindings to local storage. */
-    function saveKeybindings() {
-        localStorage.setItem('radialRacerKeyBindings', JSON.stringify(gameState.keyBindings));
-    }
-    
-    /** Checks and saves the high score if the current score is greater. */
-    function checkAndSaveHighScore() {
-        if (gameState.score > gameState.highScore) {
-            gameState.highScore = Math.floor(gameState.score);
-            localStorage.setItem('radialRacerHighScore', gameState.highScore);
-            return true;
-        }
-        return false;
-    }
-
-    // >> END ADDITION: High Score & Keybinding Persistence
 
     /** Applies the speed and traffic multipliers based on the current level. */
     function scaleGameSpeed() {
@@ -716,7 +644,7 @@
         environmentNameEl.textContent = env.name;
     }
 
-    /** Creates static background elements (grass/shoulders and wrapping trees/flowers/billboards). */
+    /** Creates static background elements (grass/shoulders and wrapping trees/flowers). */
     let grassMesh;
     function createBackgroundElements(foliageType, grassColor) {
         // Remove old elements first
@@ -743,18 +671,10 @@
 
         // 2. Foliage (Animated/Wrapping)
         for (let i = 0; i < DETAIL_COUNT; i++) {
-            let detailGroup;
+            const detailGroup = createBackgroundMesh(foliageType, grassColor); 
             
-            // >> START MODIFICATION: Add Billboards to detail mix (20% chance)
-            if (Math.random() < 0.2 && foliageType !== 'none' && foliageType !== 'flowers') {
-                 detailGroup = createBillboardMesh();
-            } else {
-                 detailGroup = createBackgroundMesh(foliageType, grassColor); 
-            }
-            // >> END MODIFICATION
-
-            // Spawn elements further from the road edge due to wider road
-            let xPos = ROAD_WIDTH / 2 + 3 + Math.random() * 8; 
+            // Adjusted: Elements are spawned further out due to wider road
+            let xPos = ROAD_WIDTH / 2 + 3 + Math.random() * 8;
             if (Math.random() > 0.5) {
                 xPos = -xPos; 
             }
@@ -1047,7 +967,7 @@
 
     // --- GAME CONTROL FUNCTIONS ---
     
-    // >> START MODIFICATION: Keybinding Functions (Saves keybindings)
+    // >> START ADDITION: Keybinding Functions
     /** Global function to update keybindings from the settings menu. */
     window.updateKeybinding = function(action, elementId) {
         const button = document.getElementById(elementId);
@@ -1070,9 +990,6 @@
             gameState.keyBindings[action] = newKey;
             button.textContent = newKey;
 
-            // SAVE KEYBINDINGS TO LOCALSTORAGE
-            saveKeybindings();
-            
             // Update controls info immediately if visible
             updateControlsInfo(); 
             
@@ -1086,8 +1003,6 @@
         document.removeEventListener('keydown', handler);
         document.addEventListener('keydown', handler, { once: true });
     };
-    // >> END MODIFICATION: Keybinding Functions
-
 
     /** Updates the on-screen controls info with the current keybindings. */
     function updateControlsInfo() {
@@ -1101,6 +1016,7 @@
 
         controlsInfoEl.innerHTML = `<p class="font-semibold">Controls: **Gas:** ${gasDisplay} (or Hold) | **Steer:** ${leftDisplay}/${rightDisplay}</p>`;
     }
+    // >> END ADDITION: Keybinding Functions
 
 
     /** Shows the main menu screen. */
@@ -1125,9 +1041,8 @@
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-center text-white w-11/12 md:w-96">
-                    <h1 class="text-6xl font-extrabold mb-2 text-yellow-400 tracking-wider shadow-white">RADIAL RACE</h1>
-                    <p class="text-xl text-gray-300 mb-6">High Score: <span class="font-extrabold text-green-400">${gameState.highScore}</span></p>
-                    <p class="text-lg text-gray-300 mb-8">Endless high-speed highway action.</p>
+                    <h1 class="text-6xl font-extrabold mb-4 text-yellow-400 tracking-wider shadow-white">RADIAL RACE</h1>
+                    <p class="text-xl text-gray-300 mb-8">Endless high-speed highway action.</p>
                     
                     <div class="space-y-4">
                         <button onclick="startGame()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg shadow-lg transition duration-200 text-xl tracking-wider">
@@ -1147,9 +1062,6 @@
 
     /** Shows the instructions modal. */
     window.showHowToPlay = function() {
-        // Ensure controls are updated to show the current keybinds
-        updateControlsInfo();
-
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-white w-11/12 md:w-1/3">
@@ -1209,7 +1121,7 @@
                         </div>
                     </div>
 
-                    <p class="text-sm text-gray-400 mt-4 text-center">Click a button above, then press the key you want to use. **(Saved automatically)**</p>
+                    <p class="text-sm text-gray-400 mt-4 text-center">Click a button above, then press the key you want to use.</p>
 
                     <button onclick="showMainMenu()" class="mt-8 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
@@ -1246,17 +1158,11 @@
 
     /** Displays the Game Over modal */
     function showGameOverScreen() {
-        // >> START MODIFICATION: Check and Save High Score
-        const isNewRecord = checkAndSaveHighScore(); 
-        // >> END MODIFICATION
-
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card bg-red-900 border-2 border-red-500 rounded-xl p-10 text-center text-white shadow-2xl z-50 w-11/12 md:w-1/3">
                     <h2 class="text-5xl font-extrabold mb-4 text-red-300">CRASH! GAME OVER!</h2>
-                    ${isNewRecord ? '<p class="text-3xl font-extrabold text-yellow-300 mb-2">NEW HIGH SCORE!</p>' : ''}
                     <p class="text-2xl mb-6">Final Score: <span class="text-yellow-400 font-extrabold">${Math.floor(gameState.score)}</span></p>
-                    <p class="text-xl text-gray-400 mb-6">High Score: <span class="text-green-400 font-extrabold">${gameState.highScore}</span></p>
                     <button onclick="showMainMenu()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
             </div>
@@ -1303,10 +1209,7 @@
 
         // Create player car (distinct blue) - Use the isPlayer flag to ensure it's a generic car
         gameState.playerCar.mesh = createCarMesh(0x3498db, true); 
-        
-        // Set player to a middle lane (e.g., lane 3 for 8 lanes)
-        gameState.playerCar.lane = Math.floor(LANE_COUNT / 2) - 1; 
-        
+        gameState.playerCar.lane = 1;
         gameState.playerCar.mesh.position.set(gameState.playerCar.lanePositions[gameState.playerCar.lane], 0, PLAYER_Z);
         gameState.playerCar.targetX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
@@ -1408,7 +1311,6 @@
     // Start the game by showing the main menu
     window.onload = function () {
         initThreeJS();
-        loadGameState(); // Load keybindings and high score before showing the menu
         showMainMenu(); 
     }
 </script>
