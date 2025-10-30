@@ -97,8 +97,7 @@
         <div class="text-center">
             <div class="text-2xl font-bold">Score: <span id="score">0</span></div>
             <div class="text-lg text-gray-400">Level: <span id="level">1</span> (<span id="environment-name">Sunny Meadow</span>)</div>
-            <div class="text-base text-gray-400 mt-1">Best Score: <span id="best-score">0</span></div>
-            </div>
+        </div>
 
         <button id="pause-button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-xl transition duration-150" onclick="togglePause()">PAUSE (Space)</button>
     </div>
@@ -121,7 +120,7 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    const LANE_COUNT = 4;
+    const LANE_COUNT = 8; // **MODIFIED:** Increased lane count from 4 to 8
     const ROAD_WIDTH = 6;
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
     // >> START ADDITION: TRUCK SIZE
@@ -202,10 +201,6 @@
     let ACCELERATION_RATE = BASE_ACCELERATION_RATE;
     let DECELERATION_RATE = BASE_DECELERATION_RATE;
 
-    // >> START ADDITION: Best Score variable
-    let bestScore = 0;
-    // >> END ADDITION
-
     // --- UI Elements ---
     const infoPanelEl = document.getElementById('info-panel');
     const controlsInfoEl = document.getElementById('controls-info');
@@ -218,9 +213,6 @@
     const pauseButtonEl = document.getElementById('pause-button');
     const scoreEl = document.getElementById('score');
     const levelEl = document.getElementById('level');
-    // >> START ADDITION: Best Score UI Element
-    const bestScoreEl = document.getElementById('best-score');
-    // >> END ADDITION
 
     // --- UTILITY AND 3D MESH GENERATION ---
 
@@ -605,29 +597,6 @@
 
     // --- GAME LOGIC FUNCTIONS ---
 
-    // >> START ADDITION: Best Score Persistence Functions
-    /** Loads the best score from local storage. */
-    function loadBestScore() {
-        const storedScore = localStorage.getItem('radialRacerBestScore');
-        if (storedScore) {
-            bestScore = parseInt(storedScore);
-        } else {
-            bestScore = 0;
-        }
-    }
-    
-    /** Saves the new best score to local storage. */
-    function updateBestScore(newScore) {
-        if (newScore > bestScore) {
-            bestScore = newScore;
-            // Store as an integer to keep it clean
-            localStorage.setItem('radialRacerBestScore', Math.floor(bestScore)); 
-            return true;
-        }
-        return false;
-    }
-    // >> END ADDITION
-
     /** Applies the speed and traffic multipliers based on the current level. */
     function scaleGameSpeed() {
         const speedFactor = Math.pow(LEVEL_MULTIPLIER, gameState.level - 1); 
@@ -749,6 +718,9 @@
             car.position.z < PLAYER_Z + 10 // Only consider cars that haven't passed the player yet
         );
         
+        // We only check for cars in the same lane (longitudinal separation). 
+        // The previous adjacent-lane and 'all lanes blocked' checks were too strict
+        // and caused the spawning deadlock/bug, especially with 8 lanes.
         for (const car of relevantTraffic) {
             const carZ = car.position.z;
             // Get the car's collision depth dynamically
@@ -766,33 +738,8 @@
                     return false; 
                 }
             }
-            
-            // 2. Adjacent-Lane Check (Lateral Separation)
-            const isAdjacent = Math.abs(car.userData.lane - currentLane) === 1;
-
-            if (isAdjacent) {
-                // Check if the adjacent car is too close longitudinally
-                if (Math.abs(carZ - spawnZ) < MIN_LATERAL_GAP) {
-                    return false;
-                }
-            }
         }
         
-        // 3. Playability Check: Ensure a path remains (Don't spawn if all other lanes are blocked near Z=FAR_Z_SPAWN)
-        const blockedLanes = new Set(); 
-        
-        for (const car of relevantTraffic) {
-            // A lane is blocked if a car is within the generous longitudinal gap distance
-            if (Math.abs(car.position.z - spawnZ) < MIN_LONGITUDINAL_GAP * 0.75) { 
-                blockedLanes.add(car.userData.lane);
-            }
-        }
-        
-        // If all lanes are blocked, it's impossible to pass through the spawn zone.
-        if (blockedLanes.size === LANE_COUNT) {
-            return false;
-        }
-
         return true; 
     }
 
@@ -858,7 +805,7 @@
             }
 
             // Only spawn if a safe lane was found within attempts
-            if (isSpawnSafe(newLane)) {
+            if (isSpawnSafe(newLane)) { 
                 createTrafficCar(newLane);
             }
             
@@ -972,12 +919,7 @@
         
         // Score update
         gameState.score += playerSpeedUnits * deltaTime * 10; 
-        const floorScore = Math.floor(gameState.score);
-        scoreEl.textContent = floorScore;
-
-        // >> START UPDATE: Display best score during game
-        bestScoreEl.textContent = Math.floor(bestScore);
-        // >> END UPDATE
+        scoreEl.textContent = Math.floor(gameState.score);
         
         // Speed update
         speedValueEl.textContent = Math.floor(playerSpeedUnits * SPEED_UNIT_TO_MPH);
@@ -1070,9 +1012,8 @@
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-center text-white w-11/12 md:w-96">
                     <h1 class="text-6xl font-extrabold mb-4 text-yellow-400 tracking-wider shadow-white">RADIAL RACE</h1>
-                    <p class="text-xl text-gray-300 mb-4">Endless high-speed highway action.</p>
+                    <p class="text-xl text-gray-300 mb-8">Endless high-speed highway action.</p>
                     
-                    <p class="text-2xl text-red-400 font-bold mb-8">BEST SCORE: ${Math.floor(bestScore)}</p>
                     <div class="space-y-4">
                         <button onclick="startGame()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg shadow-lg transition duration-200 text-xl tracking-wider">
                             START RACE
@@ -1187,24 +1128,11 @@
 
     /** Displays the Game Over modal */
     function showGameOverScreen() {
-        // >> START ADDITION: Check and update best score on game over
-        const isNewBest = updateBestScore(gameState.score);
-        const finalScore = Math.floor(gameState.score);
-        const bestDisplay = Math.floor(bestScore);
-        
-        let message = `Final Score: <span class="text-yellow-400 font-extrabold">${finalScore}</span>`;
-        if (isNewBest) {
-            message = `<span class="text-green-400 text-3xl font-extrabold block mb-2">NEW BEST SCORE!</span><span class="text-yellow-400 font-extrabold">${finalScore}</span>`;
-        } else {
-            message += `<br>Best Score: <span class="text-red-400 font-bold">${bestDisplay}</span>`;
-        }
-        // >> END ADDITION
-
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card bg-red-900 border-2 border-red-500 rounded-xl p-10 text-center text-white shadow-2xl z-50 w-11/12 md:w-1/3">
                     <h2 class="text-5xl font-extrabold mb-4 text-red-300">CRASH! GAME OVER!</h2>
-                    <p class="text-2xl mb-6">${message}</p>
+                    <p class="text-2xl mb-6">Final Score: <span class="text-yellow-400 font-extrabold">${Math.floor(gameState.score)}</span></p>
                     <button onclick="showMainMenu()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
             </div>
@@ -1251,7 +1179,8 @@
 
         // Create player car (distinct blue) - Use the isPlayer flag to ensure it's a generic car
         gameState.playerCar.mesh = createCarMesh(0x3498db, true); 
-        gameState.playerCar.lane = 1;
+        // Player starts in one of the center lanes for 8-lane road (e.g., lane 3 or 4)
+        gameState.playerCar.lane = Math.floor(LANE_COUNT / 2) - 1; 
         gameState.playerCar.mesh.position.set(gameState.playerCar.lanePositions[gameState.playerCar.lane], 0, PLAYER_Z);
         gameState.playerCar.targetX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
@@ -1267,7 +1196,6 @@
         pedalsContainerEl.classList.remove('hidden');
         scoreEl.textContent = 0;
         levelEl.textContent = 1;
-        bestScoreEl.textContent = Math.floor(bestScore); // Ensure best score is displayed
         modalContainerEl.innerHTML = '';
         pauseButtonEl.textContent = 'PAUSE (Space)';
         
@@ -1354,9 +1282,6 @@
     // Start the game by showing the main menu
     window.onload = function () {
         initThreeJS();
-        // >> START ADDITION: Load best score before showing main menu
-        loadBestScore();
-        // >> END ADDITION
         showMainMenu(); 
     }
 </script>
