@@ -120,8 +120,8 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    const LANE_COUNT = 10; // MODIFIED: Increased from 4 to 10
-    const ROAD_WIDTH = 15; // MODIFIED: Increased from 6 to 15 for 10-lane visibility
+    const LANE_COUNT = 4;
+    const ROAD_WIDTH = 6;
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
     // >> START ADDITION: TRUCK SIZE
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
@@ -141,8 +141,8 @@
 
     // Depth and Positioning
     const ROAD_DEPTH = 150; 
-    const PLAYER_Z = 10;    // MODIFIED: Increased from 3 to 10
-    const DESPAWN_Z = 12;   // Increased from 5
+    const PLAYER_Z = 3;    
+    const DESPAWN_Z = 5;   
     const FAR_Z_SPAWN = -120; // Spawn further out
     const DETAIL_COUNT = 40; 
     
@@ -186,7 +186,7 @@
         // >> END ADDITION
         playerCar: {
             mesh: null,
-            lane: Math.floor(LANE_COUNT / 2), // Start in the middle lane (4 for 10 lanes)
+            lane: 1, 
             lanePositions: [], 
             targetX: 0,
             currentX: 0,
@@ -227,17 +227,21 @@
         gameState.playerCar.lanePositions = lanePositions;
     }
 
-    // >> START ADDITION: New Car Geometries
-
     /** Creates a generic car mesh (used for player and standard traffic) with body, cabin, and wheels. */
     function createGenericCarMesh(color) {
         const carGroup = new THREE.Group();
         const material = new THREE.MeshStandardMaterial({ color: color, metalness: 0.5, roughness: 0.5 });
         
+        // Wheels (Determine size first to calculate offset)
+        const wheelRadius = CAR_SIZE.width * 0.15;
+        const bodyOffset = wheelRadius * 0.9; // A slight lift to integrate wheels visually
+
         // Main Body
         const mainBodyGeometry = new THREE.BoxGeometry(CAR_SIZE.width, CAR_SIZE.height, CAR_SIZE.depth);
         const mainBody = new THREE.Mesh(mainBodyGeometry, material);
-        mainBody.position.y = CAR_SIZE.height / 2;
+        // --- FIX 1: Raise the car body to sit on top of the wheels ---
+        mainBody.position.y = CAR_SIZE.height / 2 + bodyOffset; 
+        // -------------------------------------------------------------
         carGroup.add(mainBody);
 
         // Cabin
@@ -248,13 +252,13 @@
         const cabinMaterial = new THREE.MeshStandardMaterial({ color: color - 0x111111, metalness: 0.3, roughness: 0.8 }); 
         
         const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-        cabin.position.y = CAR_SIZE.height + cabinHeight / 2;
+        // --- FIX 2: Raise the cabin by the same offset ---
+        cabin.position.y = CAR_SIZE.height + cabinHeight / 2 + bodyOffset;
+        // -------------------------------------------------
         cabin.position.z = -CAR_SIZE.depth * 0.1;
         carGroup.add(cabin);
 
         // Wheels (Simple cylinders)
-        // MODIFIED: Halved the wheel radius from 0.15 to 0.075
-        const wheelRadius = CAR_SIZE.width * 0.075; 
         const wheelDepth = 0.1;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
         const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
@@ -269,6 +273,7 @@
         wheelPositions.forEach(pos => {
             const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheel.rotation.z = Math.PI / 2;
+            // The position is correct: center at Y=radius means bottom touches Y=0
             wheel.position.set(pos.x, wheelRadius, pos.z);
             carGroup.add(wheel);
         });
@@ -287,11 +292,17 @@
     function createTruckMesh(color) {
         const carGroup = new THREE.Group();
         const material = new THREE.MeshStandardMaterial({ color: color, metalness: 0.3, roughness: 0.6 });
+        
+        // Wheels (Determine size first to calculate offset)
+        const truckWheelRadius = CAR_SIZE.width * 0.2;
+        const bodyOffset = truckWheelRadius * 0.9; // A slight lift to integrate wheels visually
 
         // Main Body (Box)
         const mainBodyGeometry = new THREE.BoxGeometry(TRUCK_SIZE.width, TRUCK_SIZE.height, TRUCK_SIZE.depth);
         const mainBody = new THREE.Mesh(mainBodyGeometry, material);
-        mainBody.position.y = TRUCK_SIZE.height / 2;
+        // --- FIX 3: Raise the truck body to sit on top of the wheels ---
+        mainBody.position.y = TRUCK_SIZE.height / 2 + bodyOffset;
+        // -------------------------------------------------------------
         carGroup.add(mainBody);
 
         // Cabin (Smaller box on the front)
@@ -302,13 +313,14 @@
         const cabinMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.3, roughness: 0.8 }); 
         
         const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-        cabin.position.y = TRUCK_SIZE.height + cabinHeight / 2;
+        // --- FIX 4: Raise the truck cabin by the same offset ---
+        cabin.position.y = TRUCK_SIZE.height + cabinHeight / 2 + bodyOffset; 
+        // ------------------------------------------------------
         cabin.position.z = TRUCK_SIZE.depth * 0.3; // Position at the front
         carGroup.add(cabin);
         
         // Wheels (Adjusted for truck size)
-        // MODIFIED: Halved the wheel radius from 0.2 to 0.1
-        const wheelRadius = CAR_SIZE.width * 0.1; 
+        const wheelRadius = truckWheelRadius;
         const wheelDepth = 0.15;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
         const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
@@ -323,6 +335,7 @@
         wheelPositions.forEach(pos => {
             const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheel.rotation.z = Math.PI / 2;
+            // The position is correct: center at Y=radius means bottom touches Y=0
             wheel.position.set(pos.x, wheelRadius, pos.z);
             carGroup.add(wheel);
         });
@@ -365,8 +378,6 @@
         mesh.userData.isCar = true;
         return mesh;
     }
-
-    // >> END ADDITION: New Car Geometries
 
 
     /** Creates a background foliage mesh (tree, flower, or none). */
@@ -490,8 +501,8 @@
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
         camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
-        // MODIFIED: Camera moved back and up for 10-lane visibility
-        camera.position.set(0, 4.5, PLAYER_Z + 6); 
+        // Slightly higher camera angle for better road visibility
+        camera.position.set(0, 2.5, PLAYER_Z + 3.5); 
         camera.lookAt(0, 0.5, 0); // Look slightly down
 
         // Renderer setup
@@ -515,8 +526,8 @@
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 1024;
         directionalLight.shadow.mapSize.height = 1024;
-        directionalLight.shadow.camera.left = -ROAD_WIDTH * 0.8; // Adjust shadow size to road width
-        directionalLight.shadow.camera.right = ROAD_WIDTH * 0.8;
+        directionalLight.shadow.camera.left = -10;
+        directionalLight.shadow.camera.right = 10;
         directionalLight.shadow.camera.top = 10;
         directionalLight.shadow.camera.bottom = -10;
         directionalLight.shadow.camera.near = 1;
@@ -701,6 +712,11 @@
         );
 
         carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
+        // >> START ADDITION: Traffic Behavior State
+        carMesh.userData.targetLane = lane;
+        carMesh.userData.moveSpeed = 8; // Speed for traffic lane change
+        carMesh.userData.lastShiftTime = clock.getElapsedTime();
+        // >> END ADDITION
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
@@ -767,6 +783,77 @@
         return true; 
     }
 
+    /**
+     * Handles movement and behavior (lane shifting) for a single traffic car.
+     * @param {THREE.Group} carMesh - The traffic car object.
+     * @param {number} deltaTime - Time elapsed since the last frame.
+     * @returns {boolean} True if a collision occurred with the player, false otherwise.
+     */
+    function updateTrafficCar(carMesh, deltaTime) {
+        const { playerSpeedUnits, lanePositions } = gameState;
+        const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
+        
+        // 1. Move Forward
+        carMesh.position.z += trafficRelativeMoveDistance; 
+
+        // 2. Lateral Movement (Smoothly move towards the target X position)
+        const targetX = lanePositions[carMesh.userData.targetLane];
+
+        carMesh.position.x += (targetX - carMesh.position.x) * carMesh.userData.moveSpeed * deltaTime;
+
+        // If a shift is complete, lock the position and update the current lane
+        if (Math.abs(carMesh.position.x - targetX) < 0.01) {
+             carMesh.position.x = targetX;
+             carMesh.userData.lane = carMesh.userData.targetLane;
+        }
+
+        // 3. Random Lane Change Initiation (only if not currently shifting)
+        if (carMesh.userData.lane === carMesh.userData.targetLane) {
+            const timeSinceLastShift = clock.getElapsedTime() - carMesh.userData.lastShiftTime;
+            
+            // Only try to shift if enough time has passed (randomly between 3-8 seconds)
+            if (timeSinceLastShift > 3 + Math.random() * 5) { 
+                
+                // 10% chance to attempt a shift
+                if (Math.random() < 0.1) {
+                    
+                    let newLane = carMesh.userData.lane;
+                    const adjacentLanes = [];
+                    if (newLane > 0) adjacentLanes.push(newLane - 1);
+                    if (newLane < LANE_COUNT - 1) adjacentLanes.push(newLane + 1);
+
+                    if (adjacentLanes.length > 0) {
+                        const chosenLane = adjacentLanes[Math.floor(Math.random() * adjacentLanes.length)];
+                        
+                        // Basic Check: Prevent immediate collision with a car directly ahead in the target lane
+                        let isBlocked = false;
+                        const trafficCollisionDepth = carMesh.userData.collisionDepth || CAR_SIZE.depth; 
+                        
+                        // Check for a car within 3 car lengths ahead in the chosen lane
+                        const futureZ = carMesh.position.z - trafficCollisionDepth * 3; 
+                        
+                        for (const otherCar of gameState.traffic) {
+                            if (otherCar !== carMesh && otherCar.userData.lane === chosenLane) {
+                                if (otherCar.position.z > futureZ && otherCar.position.z < carMesh.position.z) {
+                                    isBlocked = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isBlocked) {
+                            carMesh.userData.targetLane = chosenLane;
+                            carMesh.userData.lastShiftTime = clock.getElapsedTime();
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Collision Check
+        return checkCollision(gameState.playerCar.mesh, carMesh);
+    }
+
 
     /** Moves and wraps all dynamic elements to create the infinite road effect. */
     function updateMotion(deltaTime) {
@@ -792,20 +879,19 @@
         playerCar.mesh.position.x = playerCar.currentX;
 
         // 3. Motion Calculations
-        const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
         const roadMoveDistance = playerSpeedUnits * deltaTime;
         
         // 4. Move and Check Traffic Cars
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
-            carMesh.position.z += trafficRelativeMoveDistance; 
-            
-            if (checkCollision(playerCar.mesh, carMesh)) {
+            // >> START UPDATE: Use the dedicated function for movement, behavior, and collision
+            if (updateTrafficCar(carMesh, deltaTime)) {
                 gameState.isGameOver = true;
                 showGameOverScreen();
                 return;
             }
+            // >> END UPDATE
 
             if (carMesh.position.z > DESPAWN_Z) {
                 scene.remove(carMesh);
@@ -1203,8 +1289,7 @@
 
         // Create player car (distinct blue) - Use the isPlayer flag to ensure it's a generic car
         gameState.playerCar.mesh = createCarMesh(0x3498db, true); 
-        // Set player to start in the new middle lane
-        gameState.playerCar.lane = Math.floor(LANE_COUNT / 2); 
+        gameState.playerCar.lane = 1;
         gameState.playerCar.mesh.position.set(gameState.playerCar.lanePositions[gameState.playerCar.lane], 0, PLAYER_Z);
         gameState.playerCar.targetX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
@@ -1275,15 +1360,19 @@
 
         let newLane = gameState.playerCar.lane;
 
-        // >> START UPDATED KEYBINDINGS
+        // >> START UPDATED KEYBINDINGS (with e.preventDefault() for better control)
         if (e.key === gameState.keyBindings.left) {
             newLane = Math.max(0, gameState.playerCar.lane - 1);
+            e.preventDefault();
         } else if (e.key === gameState.keyBindings.right) {
             newLane = Math.min(LANE_COUNT - 1, gameState.playerCar.lane + 1);
+            e.preventDefault();
         } else if (e.key === gameState.keyBindings.gas) {
             gameState.isGassing = true;
+            e.preventDefault();
         } else if (e.key === 'ArrowDown') { // Always allow ArrowDown as a universal 'brake' key
             gameState.isGassing = false; 
+            e.preventDefault();
         }
         // >> END UPDATED KEYBINDINGS
         
