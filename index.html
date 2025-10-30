@@ -120,8 +120,8 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    const LANE_COUNT = 4;
-    const ROAD_WIDTH = 12; // FIX: Increased road width from 6 to 12
+    const LANE_COUNT = 10; // MODIFIED: Increased from 4 to 10
+    const ROAD_WIDTH = 15; // MODIFIED: Increased from 6 to 15 for 10-lane visibility
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
     // >> START ADDITION: TRUCK SIZE
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
@@ -141,8 +141,8 @@
 
     // Depth and Positioning
     const ROAD_DEPTH = 150; 
-    const PLAYER_Z = 3;    
-    const DESPAWN_Z = 5;   
+    const PLAYER_Z = 10;    // MODIFIED: Increased from 3 to 10
+    const DESPAWN_Z = 12;   // Increased from 5
     const FAR_Z_SPAWN = -120; // Spawn further out
     const DETAIL_COUNT = 40; 
     
@@ -186,7 +186,7 @@
         // >> END ADDITION
         playerCar: {
             mesh: null,
-            lane: 1, 
+            lane: Math.floor(LANE_COUNT / 2), // Start in the middle lane (4 for 10 lanes)
             lanePositions: [], 
             targetX: 0,
             currentX: 0,
@@ -253,8 +253,9 @@
         carGroup.add(cabin);
 
         // Wheels (Simple cylinders)
-        const wheelRadius = CAR_SIZE.width * 0.25; // FIX: Increased wheel size for generic car
-        const wheelDepth = 0.15; // FIX: Increased wheel size for generic car
+        // MODIFIED: Halved the wheel radius from 0.15 to 0.075
+        const wheelRadius = CAR_SIZE.width * 0.075; 
+        const wheelDepth = 0.1;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
         const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
         
@@ -306,8 +307,9 @@
         carGroup.add(cabin);
         
         // Wheels (Adjusted for truck size)
-        const wheelRadius = CAR_SIZE.width * 0.3; // FIX: Increased wheel size for truck
-        const wheelDepth = 0.2; // FIX: Increased wheel size for truck
+        // MODIFIED: Halved the wheel radius from 0.2 to 0.1
+        const wheelRadius = CAR_SIZE.width * 0.1; 
+        const wheelDepth = 0.15;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
         const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
         
@@ -488,8 +490,8 @@
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
         camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
-        // Slightly higher camera angle for better road visibility
-        camera.position.set(0, 2.5, PLAYER_Z + 3.5); 
+        // MODIFIED: Camera moved back and up for 10-lane visibility
+        camera.position.set(0, 4.5, PLAYER_Z + 6); 
         camera.lookAt(0, 0.5, 0); // Look slightly down
 
         // Renderer setup
@@ -513,8 +515,8 @@
         directionalLight.castShadow = true;
         directionalLight.shadow.mapSize.width = 1024;
         directionalLight.shadow.mapSize.height = 1024;
-        directionalLight.shadow.camera.left = -10;
-        directionalLight.shadow.camera.right = 10;
+        directionalLight.shadow.camera.left = -ROAD_WIDTH * 0.8; // Adjust shadow size to road width
+        directionalLight.shadow.camera.right = ROAD_WIDTH * 0.8;
         directionalLight.shadow.camera.top = 10;
         directionalLight.shadow.camera.bottom = -10;
         directionalLight.shadow.camera.near = 1;
@@ -699,12 +701,6 @@
         );
 
         carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
-        // >> START ADDITION: Traffic Lane Change Setup
-        carMesh.userData.targetLane = lane;
-        carMesh.userData.moveSpeed = 8 + Math.random() * 4; // Speed for X-axis movement
-        carMesh.userData.lastLaneChange = 0; 
-        carMesh.userData.laneChangeInterval = 5 + Math.random() * 8; // Change lane every 5-13 seconds
-        // >> END ADDITION
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
@@ -803,57 +799,6 @@
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
-            // >> START ADDITION: Traffic Lane Changing Logic (NPC movement)
-            carMesh.userData.lastLaneChange += deltaTime;
-
-            // 1. Smoothly move car towards its target X position (targetLane is also set to lane on spawn)
-            const targetX = gameState.playerCar.lanePositions[carMesh.userData.targetLane];
-            carMesh.position.x += (targetX - carMesh.position.x) * carMesh.userData.moveSpeed * deltaTime * 0.5;
-
-            // 2. Decide if car should change lane (every 5-13 seconds)
-            if (carMesh.userData.lastLaneChange > carMesh.userData.laneChangeInterval) {
-                
-                let newLane = carMesh.userData.targetLane;
-                const availableDirections = [-1, 1]; // Try left or right
-
-                // Randomly try a direction
-                if (Math.random() < 0.5) { availableDirections.reverse(); } 
-
-                for (const direction of availableDirections) {
-                    const potentialLane = carMesh.userData.targetLane + direction;
-                    
-                    if (potentialLane >= 0 && potentialLane < LANE_COUNT) {
-                        // Check if the lane ahead is clear of other traffic cars 
-                        const isLaneClear = !traffic.some(otherCar => {
-                            // Only check cars that are ahead of this car
-                            const isAhead = otherCar.position.z < carMesh.position.z; 
-                            const distance = carMesh.position.z - otherCar.position.z;
-                            
-                            // Check for cars in the potential *target* lane that are immediately in front
-                            if (otherCar.userData.targetLane === potentialLane && isAhead && distance < MIN_LONGITUDINAL_GAP * 2) {
-                                return true; // Lane is blocked: car too close ahead in target lane
-                            }
-                            // Also check for cars in the potential *target* lane that are immediately behind (to prevent cutting off)
-                             if (otherCar.userData.targetLane === potentialLane && !isAhead && distance < CAR_SIZE.depth * 3) {
-                                return true; // Lane is blocked: car too close behind in target lane
-                            }
-                            return false;
-                        });
-
-                        if (isLaneClear) {
-                            newLane = potentialLane;
-                            break; // Found a clear lane, stop searching
-                        }
-                    }
-                }
-                
-                carMesh.userData.targetLane = newLane;
-                carMesh.userData.lastLaneChange = 0; // Reset timer
-                carMesh.userData.laneChangeInterval = 5 + Math.random() * 8; // Reset interval
-            }
-            // >> END ADDITION
-
-
             carMesh.position.z += trafficRelativeMoveDistance; 
             
             if (checkCollision(playerCar.mesh, carMesh)) {
@@ -863,8 +808,6 @@
             }
 
             if (carMesh.position.z > DESPAWN_Z) {
-                // Score update for passing a car
-                gameState.score += 50; 
                 scene.remove(carMesh);
                 traffic.splice(i, 1);
             }
@@ -961,32 +904,27 @@
     function checkCollision(player, trafficMesh) {
         const playerZ = PLAYER_Z; 
         const trafficZ = trafficMesh.position.z;
+        const halfWidth = CAR_SIZE.width / 2;
+        const halfDepth = CAR_SIZE.depth / 2;
         
-        // FIX: Use the actual dimensions of the cars for a more accurate check
-        const playerWidth = CAR_SIZE.width;
-        const playerDepth = CAR_SIZE.depth;
-        const trafficWidth = trafficMesh.userData.carType === 'truck' ? TRUCK_SIZE.width : CAR_SIZE.width;
-        const trafficDepth = trafficMesh.userData.collisionDepth || CAR_SIZE.depth; 
-        
-        const playerHalfWidth = playerWidth / 2;
-        const playerHalfDepth = playerDepth / 2;
-        const trafficHalfWidth = trafficWidth / 2;
-        const trafficHalfDepth = trafficDepth / 2; 
+        // Use the car's dynamic collision depth (set in createCarMesh/createTruckMesh)
+        const trafficCollisionDepth = trafficMesh.userData.collisionDepth || CAR_SIZE.depth; 
+        const trafficHalfDepth = trafficCollisionDepth / 2; 
 
-        // 1. X-axis overlap check (using actual positions and widths)
-        const playerMinX = player.position.x - playerHalfWidth * 0.9; 
-        const playerMaxX = player.position.x + playerHalfWidth * 0.9;
-        const trafficMinX = trafficMesh.position.x - trafficHalfWidth * 0.9;
-        const trafficMaxX = trafficMesh.position.x + trafficHalfWidth * 0.9;
+        // 1. X-axis overlap check (simple check for same lane)
+        const playerMinX = player.position.x - halfWidth * 0.9; 
+        const playerMaxX = player.position.x + halfWidth * 0.9;
+        const trafficMinX = trafficMesh.position.x - halfWidth * 0.9;
+        const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9;
 
         const xOverlap = Math.max(0, Math.min(playerMaxX, trafficMaxX) - Math.max(playerMinX, trafficMinX));
 
-        // Use a minimum overlap threshold
-        if (xOverlap > playerWidth * 0.1) {
+        if (xOverlap > CAR_SIZE.width * 0.1) {
             // 2. Z-axis overlap
-            const playerFrontZ = playerZ + playerHalfDepth;
-            const playerBackZ = playerZ - playerHalfDepth;
+            const playerFrontZ = playerZ + halfDepth;
+            const playerBackZ = playerZ - halfDepth;
             
+            // Use trafficHalfDepth for traffic car
             const trafficFrontZ = trafficZ + trafficHalfDepth;
             const trafficBackZ = trafficZ - trafficHalfDepth;
 
@@ -1265,7 +1203,8 @@
 
         // Create player car (distinct blue) - Use the isPlayer flag to ensure it's a generic car
         gameState.playerCar.mesh = createCarMesh(0x3498db, true); 
-        gameState.playerCar.lane = 1;
+        // Set player to start in the new middle lane
+        gameState.playerCar.lane = Math.floor(LANE_COUNT / 2); 
         gameState.playerCar.mesh.position.set(gameState.playerCar.lanePositions[gameState.playerCar.lane], 0, PLAYER_Z);
         gameState.playerCar.targetX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
