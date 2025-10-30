@@ -75,8 +75,10 @@
             background: linear-gradient(135deg, #2d3748, #1a202c);
             border: 4px solid #4a5568;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            /* --- FIX: Added max height and overflow scroll for responsiveness --- */
             max-height: 90vh; 
             overflow-y: auto;
+            /* -------------------------------------------------------------------- */
         }
     </style>
 </head>
@@ -95,18 +97,14 @@
         <div class="text-center">
             <div class="text-2xl font-bold">Score: <span id="score">0</span></div>
             <div class="text-lg text-gray-400">Level: <span id="level">1</span> (<span id="environment-name">Sunny Meadow</span>)</div>
-            <div class="text-sm text-yellow-300 font-semibold">High Score: <span id="high-score-display">0</span></div>
-        </div>
+            <div class="text-base text-gray-400 mt-1">Best Score: <span id="best-score">0</span></div>
+            </div>
 
         <button id="pause-button" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg shadow-xl transition duration-150" onclick="togglePause()">PAUSE (Space)</button>
     </div>
     
     <div id="controls-info" class="absolute bottom-24 md:bottom-32 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-gray-300 text-base md:text-lg text-center p-2 bg-gray-900 bg-opacity-70 rounded-lg z-20 shadow-2xl hidden">
         <p class="font-semibold">Controls: **Gas:** Up Arrow (or Hold) | **Steer:** Left/Right Arrow</p>
-    </div>
-
-    <div id="near-miss-display" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 text-5xl font-extrabold text-red-500 opacity-0 transition-opacity duration-300 z-30 pointer-events-none">
-        NEAR MISS! X2
     </div>
 
     <div id="pedals-container" class="absolute bottom-5 right-5 flex gap-5 z-20 hidden">
@@ -126,11 +124,12 @@
     const LANE_COUNT = 4;
     const ROAD_WIDTH = 6;
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
+    // >> START ADDITION: TRUCK SIZE
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
-    // Detail 5: Van Size
-    const VAN_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.8, height: 0.8, depth: 2.5 }; 
+    // >> END ADDITION
     const SPEED_UNIT_TO_MPH = 5.33; 
     
+    // Fixed road color (Classic Road as requested)
     const CLASSIC_ROAD_COLOR = 0x222222; 
     
     // Physics and Speed constants (ADJUSTED FOR FASTER FEEL AND MORE BUFFER)
@@ -140,11 +139,6 @@
     const BASE_ACCELERATION_RATE = 7.0; 
     const BASE_DECELERATION_RATE = 10.0; 
     const LEVEL_MULTIPLIER = 1.08; 
-    
-    // Detail 1: Traffic AI Constants
-    const TRAFFIC_LANE_CHANGE_RATE = 0.5; // How fast traffic moves sideways
-    const TRAFFIC_CHANGE_DECISION_INTERVAL = 3.0; // Seconds between AI deciding to change lane
-    const BLINKER_INTERVAL = 0.25; // Blinker flash speed
 
     // Depth and Positioning
     const ROAD_DEPTH = 150; 
@@ -154,25 +148,21 @@
     const DETAIL_COUNT = 40; 
     
     // Traffic Intensity (ADJUSTED for smoother difficulty ramp)
-    const BASE_SPAWN_INTERVAL = 0.55; 
-    const TRAFFIC_MULTIPLIER = 1.20; 
+    const BASE_SPAWN_INTERVAL = 0.55; // Increased from 0.45 
+    const TRAFFIC_MULTIPLIER = 1.20; // Reduced from 1.35 (slower difficulty ramp)
     
-    // Collision and Near-Miss constants
+    // **ADJUSTED:** Minimum required Z-gap for the longitudinal buffer (3.5 car lengths)
     const MIN_LONGITUDINAL_GAP = CAR_SIZE.depth * 3.5; 
+    // **ADJUSTED:** Minimum required Z-gap for the lateral buffer (1.2 car lengths)
     const MIN_LATERAL_GAP = CAR_SIZE.depth * 1.2; 
-    // Detail 19: Near-miss distance (narrowly avoiding a crash)
-    const NEAR_MISS_DISTANCE = CAR_SIZE.depth * 1.8; 
-    const NEAR_MISS_SCORE_MULTIPLIER = 2.0;
 
     // --- ENVIRONMENT PRESETS ---
-    // Detail 18: Added Coastal Sunset environment
     const ENVIRONMENTS = [
         { name: "Sunny Meadow", skyColor: 0x87CEEB, fogNear: 0.4, fogFar: 0.8, grassColor: 0x38761d, foliageType: 'flowers', weather: 'none' }, 
         { name: "Autumn Dusk", skyColor: 0xcd6133, fogNear: 0.35, fogFar: 0.75, grassColor: 0x996515, foliageType: 'autumn', weather: 'none' }, 
         { name: "Heavy Rain", skyColor: 0x4d5656, fogNear: 0.15, fogFar: 0.5, grassColor: 0x3d3d3d, foliageType: 'wet', weather: 'rain' },
         { name: "Blizzard Drive", skyColor: 0xddeeff, fogNear: 0.1, fogFar: 0.4, grassColor: 0x99aaff, foliageType: 'snowy', weather: 'snow' },
-        { name: "Night Ascent", skyColor: 0x1f2937, fogNear: 0.1, fogFar: 0.55, grassColor: 0x000000, foliageType: 'lights', weather: 'none' },
-        { name: "Coastal Sunset", skyColor: 0xffa07a, fogNear: 0.25, fogFar: 0.65, grassColor: 0x6b8e23, foliageType: 'sparse', weather: 'none' },
+        { name: "Night Ascent", skyColor: 0x1f2937, fogNear: 0.1, fogFar: 0.55, grassColor: 0x000000, foliageType: 'none', weather: 'none' },
     ];
 
     // --- GAME STATE ---
@@ -188,11 +178,13 @@
         backgroundElements: [],
         weatherParticles: null,
         currentEnvironmentIndex: 0,
+        // >> START ADDITION: Keybindings
         keyBindings: {
             gas: 'ArrowUp',
             left: 'ArrowLeft',
             right: 'ArrowRight'
         },
+        // >> END ADDITION
         playerCar: {
             mesh: null,
             lane: 1, 
@@ -200,13 +192,7 @@
             targetX: 0,
             currentX: 0,
             moveSpeed: 12 
-        },
-        // Detail 12: High Score
-        highScore: localStorage.getItem('radialRacerHighScore') ? parseInt(localStorage.getItem('radialRacerHighScore')) : 0,
-        // Detail 19: Near-Miss Timer
-        nearMissTimer: 0,
-        currentScoreMultiplier: 1.0,
-        lastBlinkerToggle: 0 // Detail 3: Blinker timer
+        }
     };
     
     // Dynamic Speed Variables
@@ -215,6 +201,10 @@
     let TRAFFIC_SPEED = BASE_TRAFFIC_SPEED;
     let ACCELERATION_RATE = BASE_ACCELERATION_RATE;
     let DECELERATION_RATE = BASE_DECELERATION_RATE;
+
+    // >> START ADDITION: Best Score variable
+    let bestScore = 0;
+    // >> END ADDITION
 
     // --- UI Elements ---
     const infoPanelEl = document.getElementById('info-panel');
@@ -228,11 +218,11 @@
     const pauseButtonEl = document.getElementById('pause-button');
     const scoreEl = document.getElementById('score');
     const levelEl = document.getElementById('level');
-    const highScoreDisplayEl = document.getElementById('high-score-display');
-    const nearMissDisplayEl = document.getElementById('near-miss-display');
+    // >> START ADDITION: Best Score UI Element
+    const bestScoreEl = document.getElementById('best-score');
+    // >> END ADDITION
 
     // --- UTILITY AND 3D MESH GENERATION ---
-    highScoreDisplayEl.textContent = gameState.highScore; // Initialize high score display
 
     /** Calculates the center X position for each lane. */
     function calculateLanePositions() {
@@ -244,64 +234,8 @@
         }
         gameState.playerCar.lanePositions = lanePositions;
     }
-    
-    // --- Detail Functions for Cars (Lights, Wheels) ---
-    const headlightMaterial = new THREE.MeshBasicMaterial({ color: 0xffffaa });
-    const taillightMaterial = new THREE.MeshBasicMaterial({ color: 0xcc0000 });
-    const blinkerMaterial = new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 0.8 });
-    const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
-    const wheelGeometry = new THREE.CylinderGeometry(CAR_SIZE.width * 0.15, CAR_SIZE.width * 0.15, 0.1, 8);
-    wheelGeometry.rotateZ(Math.PI / 2);
 
-    /** Adds light meshes and wheels to a car group. */
-    function addDetails(carGroup, size, depthOffset = 0) {
-        // Detail 6, 7: Lights
-        const lightGeo = new THREE.BoxGeometry(size.width * 0.1, size.height * 0.1, 0.05);
-
-        // Headlights (Front)
-        const hlL = new THREE.Mesh(lightGeo, headlightMaterial);
-        hlL.position.set(-size.width * 0.4, size.height * 0.4, size.depth / 2 + depthOffset);
-        const hlR = hlL.clone();
-        hlR.position.x = size.width * 0.4;
-        carGroup.add(hlL, hlR);
-        
-        // Taillights (Back)
-        const tlL = new THREE.Mesh(lightGeo, taillightMaterial);
-        tlL.position.set(-size.width * 0.4, size.height * 0.4, -size.depth / 2 + depthOffset);
-        const tlR = tlL.clone();
-        tlR.position.x = size.width * 0.4;
-        carGroup.add(tlL, tlR);
-        
-        // Detail 2: Blinkers
-        const blinkerGeo = new THREE.BoxGeometry(size.width * 0.05, size.height * 0.05, 0.05);
-        const blL = new THREE.Mesh(blinkerGeo, blinkerMaterial);
-        blL.position.set(-size.width * 0.4, size.height * 0.4, size.depth / 2 + depthOffset - 0.06); 
-        blL.visible = false;
-        
-        const blR = blL.clone();
-        blR.position.x = size.width * 0.4;
-        blR.name = 'blinkerRight';
-        blL.name = 'blinkerLeft';
-        carGroup.add(blL, blR);
-
-        // Wheels (Detail 20: Will rotate in updateMotion)
-        const wheelPositions = [
-            { x: size.width * 0.45, z: size.depth * 0.3 },
-            { x: -size.width * 0.45, z: size.depth * 0.3 },
-            { x: size.width * 0.45, z: -size.depth * 0.3 },
-            { x: -size.width * 0.45, z: -size.depth * 0.3 },
-        ];
-
-        wheelPositions.forEach(pos => {
-            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-            wheel.position.set(pos.x, CAR_SIZE.width * 0.15, pos.z);
-            wheel.userData.isWheel = true;
-            carGroup.add(wheel);
-        });
-
-        return carGroup;
-    }
-
+    // >> START ADDITION: New Car Geometries
 
     /** Creates a generic car mesh (used for player and standard traffic) with body, cabin, and wheels. */
     function createGenericCarMesh(color) {
@@ -326,10 +260,34 @@
         cabin.position.z = -CAR_SIZE.depth * 0.1;
         carGroup.add(cabin);
 
+        // Wheels (Simple cylinders)
+        const wheelRadius = CAR_SIZE.width * 0.15;
+        const wheelDepth = 0.1;
+        const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
+        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
+        
+        const wheelPositions = [
+            { x: CAR_SIZE.width * 0.45, z: CAR_SIZE.depth * 0.3 },
+            { x: -CAR_SIZE.width * 0.45, z: CAR_SIZE.depth * 0.3 },
+            { x: CAR_SIZE.width * 0.45, z: -CAR_SIZE.depth * 0.3 },
+            { x: -CAR_SIZE.width * 0.45, z: -CAR_SIZE.depth * 0.3 },
+        ];
+
+        wheelPositions.forEach(pos => {
+            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel.rotation.z = Math.PI / 2;
+            wheel.position.set(pos.x, wheelRadius, pos.z);
+            carGroup.add(wheel);
+        });
+        
+        carGroup.children.forEach(child => {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        });
+        carGroup.userData.isCar = true;
         carGroup.userData.carType = 'generic';
         carGroup.userData.collisionDepth = CAR_SIZE.depth;
-
-        return addDetails(carGroup, CAR_SIZE);
+        return carGroup;
     }
 
     /** Creates a truck mesh. */
@@ -355,49 +313,51 @@
         cabin.position.z = TRUCK_SIZE.depth * 0.3; // Position at the front
         carGroup.add(cabin);
         
+        // Wheels (Adjusted for truck size)
+        const wheelRadius = CAR_SIZE.width * 0.2;
+        const wheelDepth = 0.15;
+        const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
+        const wheelMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 }); 
+        
+        const wheelPositions = [
+            { x: TRUCK_SIZE.width * 0.4, z: TRUCK_SIZE.depth * 0.4 },
+            { x: -TRUCK_SIZE.width * 0.4, z: TRUCK_SIZE.depth * 0.4 },
+            { x: TRUCK_SIZE.width * 0.4, z: -TRUCK_SIZE.depth * 0.4 },
+            { x: -TRUCK_SIZE.width * 0.4, z: -TRUCK_SIZE.depth * 0.4 },
+        ];
+
+        wheelPositions.forEach(pos => {
+            const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+            wheel.rotation.z = Math.PI / 2;
+            wheel.position.set(pos.x, wheelRadius, pos.z);
+            carGroup.add(wheel);
+        });
+
+        carGroup.children.forEach(child => {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        });
+        carGroup.userData.isCar = true;
         carGroup.userData.carType = 'truck';
-        carGroup.userData.collisionDepth = TRUCK_SIZE.depth; 
-
-        // Offset the depth for details since the body is pushed back
-        return addDetails(carGroup, TRUCK_SIZE, 0); 
+        carGroup.userData.collisionDepth = TRUCK_SIZE.depth; // Set dynamic depth
+        return carGroup;
     }
-
-    // Detail 5: Creates a van mesh.
-    function createVanMesh(color) {
-        const carGroup = new THREE.Group();
-        const material = new THREE.MeshStandardMaterial({ color: color, metalness: 0.4, roughness: 0.7 });
-
-        // Main Body (Tall Box)
-        const mainBodyGeometry = new THREE.BoxGeometry(VAN_SIZE.width, VAN_SIZE.height, VAN_SIZE.depth);
-        const mainBody = new THREE.Mesh(mainBodyGeometry, material);
-        mainBody.position.y = VAN_SIZE.height / 2;
-        carGroup.add(mainBody);
-
-        carGroup.userData.carType = 'van';
-        carGroup.userData.collisionDepth = VAN_SIZE.depth; 
-
-        return addDetails(carGroup, VAN_SIZE); 
-    }
-
 
     /** Creates a car mesh (randomly selects between types for traffic, or always generic for player). */
     function createCarMesh(color, isPlayer = false) {
         if (isPlayer) {
-            const mesh = createGenericCarMesh(color);
-            // Player car doesn't need AI properties
-            mesh.userData.isCar = true;
-            return mesh;
+            return createGenericCarMesh(color);
         }
 
-        // Randomly choose car type for traffic (Details 5, 8, 9, 10)
-        const carTypes = [createGenericCarMesh, createTruckMesh, createVanMesh];
-        const weights = [70, 20, 10]; // 70% generic car, 20% truck, 10% van
+        // Randomly choose car type for traffic
+        const carTypes = [createGenericCarMesh, createTruckMesh];
+        const weights = [80, 20]; // 80% generic car, 20% truck
 
         let totalWeight = 0;
         for (const weight of weights) { totalWeight += weight; }
 
         let random = Math.random() * totalWeight;
-        let selectedType = createGenericCarMesh; 
+        let selectedType = createGenericCarMesh; // Default to generic
 
         for (let i = 0; i < carTypes.length; i++) {
             random -= weights[i];
@@ -408,75 +368,26 @@
         }
 
         const mesh = selectedType(color);
-        
         mesh.userData.isCar = true;
-        // Detail 1: Traffic AI properties
-        mesh.userData.targetX = 0;
-        mesh.userData.currentX = 0;
-        mesh.userData.isSwitching = false;
-        mesh.userData.laneChangeTimer = TRAFFIC_CHANGE_DECISION_INTERVAL * Math.random(); // Start randomly
-        
-        mesh.children.forEach(child => {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        });
-
         return mesh;
     }
 
-    // Detail 15, 16: Overhead Street Light
-    function createStreetLightMesh() {
-        const group = new THREE.Group();
-        
-        // Pole (Thin cylinder)
-        const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 5, 6);
-        const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.8 });
-        const pole = new THREE.Mesh(poleGeo, poleMat);
-        pole.position.y = 2.5; 
-        group.add(pole);
-
-        // Light Arm (Horizontal bar)
-        const armGeo = new THREE.BoxGeometry(1.5, 0.05, 0.05);
-        const armMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-        const arm = new THREE.Mesh(armGeo, armMat);
-        arm.position.set(0.75, 5, 0); 
-        group.add(arm);
-
-        // Light Source (Glow)
-        const lightGeo = new THREE.SphereGeometry(0.15, 8, 8);
-        const lightMat = new THREE.MeshBasicMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.7 });
-        const lightMesh = new THREE.Mesh(lightGeo, lightMat);
-        lightMesh.position.set(1.5, 5, 0); 
-        group.add(lightMesh);
-
-        // Add a point light to simulate the glow
-        const pointLight = new THREE.PointLight(0xffffff, 20, 10);
-        pointLight.position.set(1.5, 5, 0);
-        group.add(pointLight);
-
-        group.userData.isBackgroundElement = true;
-        group.userData.isStreetLight = true;
-        return group;
-    }
+    // >> END ADDITION: New Car Geometries
 
 
     /** Creates a background foliage mesh (tree, flower, or none). */
     function createBackgroundMesh(style, grassColor) {
-        // ... (Existing foliage code remains here) ...
         const detailGroup = new THREE.Group();
         detailGroup.userData.isBackgroundElement = true;
         
-        if (style === 'none' || style === 'lights') {
-             // Detail 15, 16: Handle Street Lights for Night Ascent
-            if (style === 'lights' && Math.random() < 0.3) { 
-                return createStreetLightMesh();
-            }
-            return detailGroup; 
+        if (style === 'none') {
+            return detailGroup; // Return empty group for "night ascent"
         }
 
         const trunkColor = 0x7c4912;
         let topColor = grassColor; 
 
+        // Simplified flower object (for performance)
         if (style === 'flowers') {
             const flowerColor = [0xFFC0CB, 0xFFA07A, 0x90EE90, 0xADD8E6][Math.floor(Math.random() * 4)];
             const geometry = new THREE.ConeGeometry(0.3, 0.4, 4);
@@ -485,6 +396,7 @@
             flower.position.y = 0.2;
             detailGroup.add(flower);
         } else {
+            // Standard/Autumn/Snowy Tree
             const trunkGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.6, 8);
             const trunkMaterial = new THREE.MeshStandardMaterial({ color: trunkColor, roughness: 1 }); 
             const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
@@ -501,8 +413,6 @@
                 topYPos = 1.2;
                 if (style === 'autumn') {
                     topColor = [0x992d00, 0xcc6600, 0x4d3200][Math.floor(Math.random() * 3)];
-                } else if (style === 'sparse') { // Detail 18: Coastal Sunset foliage
-                     topColor = [0x008080, 0x6b8e23][Math.floor(Math.random() * 2)];
                 }
             }
 
@@ -522,7 +432,6 @@
 
     /** Creates and adds rain/snow particle systems. */
     function createWeatherParticleSystem(weatherType) {
-        // ... (Existing weather code remains here) ...
         const particleCount = weatherType === 'rain' ? 2500 : 1800;
         const geometry = new THREE.BufferGeometry();
         const positions = [];
@@ -530,8 +439,11 @@
         const zWrap = ROAD_DEPTH * 0.8;
 
         for (let i = 0; i < particleCount; i++) {
+            // X: Wide range across the scene
             positions.push( (Math.random() - 0.5) * rainVolumeWidth ); 
+            // Y: High above the road
             positions.push( 15 + Math.random() * 10 ); 
+            // Z: Spread out along the road depth
             positions.push( FAR_Z_SPAWN + Math.random() * zWrap );
         }
 
@@ -574,18 +486,21 @@
 
     /** Initializes the 3D scene, camera, and renderer. */
     function initThreeJS() {
-        // ... (Existing initThreeJS code remains here) ...
+        // Scene setup
         scene = new THREE.Scene();
         
         const initialEnv = ENVIRONMENTS[0];
         scene.fog = new THREE.Fog(initialEnv.skyColor, ROAD_DEPTH * initialEnv.fogNear, ROAD_DEPTH * initialEnv.fogFar);
         
+        // Camera setup
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
         camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
+        // Slightly higher camera angle for better road visibility
         camera.position.set(0, 2.5, PLAYER_Z + 3.5); 
-        camera.lookAt(0, 0.5, 0); 
+        camera.lookAt(0, 0.5, 0); // Look slightly down
 
+        // Renderer setup
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(initialWidth, initialHeight);
         renderer.shadowMap.enabled = true;
@@ -595,9 +510,12 @@
         window.addEventListener('resize', onWindowResize);
         clock = new THREE.Clock();
 
+        // Lighting - Enhanced for better contrast and shadows
+        // 1. Hemisphere Light (Soft ambient lighting)
         const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
         scene.add(hemisphereLight);
 
+        // 2. Directional Light (Sun/Headlight effect for shadows)
         const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
@@ -614,7 +532,6 @@
     
     /** Handles resizing the canvas and camera when the window size changes. */
     function onWindowResize() {
-        // ... (Existing onWindowResize code remains here) ...
         if (!camera || !renderer) return;
         const newWidth = window.innerWidth;
         const newHeight = window.innerHeight;
@@ -626,7 +543,7 @@
     
     /** Creates the static road and the animated lane markings. */
     function createRoad() {
-        // ... (Existing createRoad code remains here) ...
+        // 1. Road Surface (Fixed Classic Asphalt Color)
         const roadGeometry = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_DEPTH, 1, 150); 
         const roadMaterial = new THREE.MeshLambertMaterial({ color: CLASSIC_ROAD_COLOR });
         const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
@@ -637,10 +554,12 @@
         roadMesh.userData.isRoad = true;
         scene.add(roadMesh);
         
+        // 2. Lane Lines (White Dashes)
         const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const lineDepth = 1.2; 
         const lineGap = 1.8; 
         const totalPattern = lineDepth + lineGap;
+        // Calculate needed number of lines based on depth
         const numLines = Math.ceil(ROAD_DEPTH / totalPattern) * 2; 
         
         for (let i = 1; i < LANE_COUNT; i++) {
@@ -654,6 +573,7 @@
                 const lineMesh = new THREE.Mesh(lineGeometry, lineMaterial);
                 
                 lineMesh.rotation.x = -Math.PI / 2;
+                // Offset the starting Z position to ensure wrapping works smoothly
                 lineMesh.position.set(xPos, 0.01, FAR_Z_SPAWN + j * totalPattern); 
                 lineGroup.add(lineMesh);
             }
@@ -661,9 +581,11 @@
             scene.add(lineGroup);
         }
 
+        // >> START ADDITION: Road Railings (Guardrails)
         const railingGeometry = new THREE.BoxGeometry(0.15, 0.4, ROAD_DEPTH); 
         const railingMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 }); 
 
+        // 3. Left Railing
         const leftRailing = new THREE.Mesh(railingGeometry, railingMaterial);
         leftRailing.position.set(-ROAD_WIDTH / 2 - 0.5, 0.2, -ROAD_DEPTH / 2 + PLAYER_Z);
         leftRailing.receiveShadow = true;
@@ -671,19 +593,43 @@
         leftRailing.userData.isRoadDetail = true;
         scene.add(leftRailing);
         
+        // 4. Right Railing
         const rightRailing = new THREE.Mesh(railingGeometry, railingMaterial);
         rightRailing.position.set(ROAD_WIDTH / 2 + 0.5, 0.2, -ROAD_DEPTH / 2 + PLAYER_Z);
         rightRailing.receiveShadow = true;
         rightRailing.castShadow = true;
         rightRailing.userData.isRoadDetail = true;
         scene.add(rightRailing);
+        // >> END ADDITION
     }
 
     // --- GAME LOGIC FUNCTIONS ---
 
+    // >> START ADDITION: Best Score Persistence Functions
+    /** Loads the best score from local storage. */
+    function loadBestScore() {
+        const storedScore = localStorage.getItem('radialRacerBestScore');
+        if (storedScore) {
+            bestScore = parseInt(storedScore);
+        } else {
+            bestScore = 0;
+        }
+    }
+    
+    /** Saves the new best score to local storage. */
+    function updateBestScore(newScore) {
+        if (newScore > bestScore) {
+            bestScore = newScore;
+            // Store as an integer to keep it clean
+            localStorage.setItem('radialRacerBestScore', Math.floor(bestScore)); 
+            return true;
+        }
+        return false;
+    }
+    // >> END ADDITION
+
     /** Applies the speed and traffic multipliers based on the current level. */
     function scaleGameSpeed() {
-        // ... (Existing scaleGameSpeed code remains here) ...
         const speedFactor = Math.pow(LEVEL_MULTIPLIER, gameState.level - 1); 
 
         MAX_PLAYER_SPEED = BASE_MAX_PLAYER_SPEED * speedFactor;
@@ -697,30 +643,35 @@
 
     /** Updates the scene's colors, fog, and light based on the current level/environment. */
     function updateEnvironment(newLevel) {
-        // ... (Existing updateEnvironment code remains here) ...
+        // 1. Determine environment settings
         gameState.currentEnvironmentIndex = (newLevel - 1) % ENVIRONMENTS.length;
         const env = ENVIRONMENTS[gameState.currentEnvironmentIndex];
 
+        // 2. Cleanup weather and background elements
         cleanupWeather(); 
         
+        // 3. Apply general scene settings
         scene.background = new THREE.Color(env.skyColor);
         scene.fog.color.set(env.skyColor);
         scene.fog.near = ROAD_DEPTH * env.fogNear;
         scene.fog.far = ROAD_DEPTH * env.fogFar;
 
+        // 4. Update Background Elements (clear and redraw with new style)
         createBackgroundElements(env.foliageType, env.grassColor);
         
+        // 5. Spawn Weather Effects
         if (env.weather === 'rain' || env.weather === 'snow') {
             createWeatherParticleSystem(env.weather);
         }
 
+        // 6. Update UI
         environmentNameEl.textContent = env.name;
     }
 
     /** Creates static background elements (grass/shoulders and wrapping trees/flowers). */
     let grassMesh;
     function createBackgroundElements(foliageType, grassColor) {
-        // ... (Existing createBackgroundElements code remains here) ...
+        // Remove old elements first
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
             if (child.userData.isBackgroundElement) { 
@@ -743,10 +694,7 @@
         scene.add(grassMesh);
 
         // 2. Foliage (Animated/Wrapping)
-        // Detail: Added more objects for denser background in non-lights environment
-        const elementCount = foliageType === 'lights' ? DETAIL_COUNT / 2 : DETAIL_COUNT; 
-        
-        for (let i = 0; i < elementCount; i++) {
+        for (let i = 0; i < DETAIL_COUNT; i++) {
             const detailGroup = createBackgroundMesh(foliageType, grassColor); 
             
             let xPos = ROAD_WIDTH / 2 + 3 + Math.random() * 8;
@@ -769,46 +717,51 @@
         const trafficColors = [0xe74c3c, 0xf1c40f, 0x9b59b6, 0x1abc9c, 0xecf0f1, 0x34495e, 0x95a5a6]; 
         const carColor = trafficColors[Math.floor(Math.random() * trafficColors.length)];
 
+        // Pass false for isPlayer
         const carMesh = createCarMesh(carColor, false);
         
+        // Check which size we used to adjust the spawn position correctly
         const carDepth = carMesh.userData.collisionDepth;
         
-        const startX = gameState.playerCar.lanePositions[lane];
-
         carMesh.position.set(
-            startX, 
+            gameState.playerCar.lanePositions[lane], 
             0, 
             FAR_Z_SPAWN + carDepth / 2 + Math.random() * 20 
         );
 
-        carMesh.userData.lane = lane; 
-        // Detail 1: Initialize targetX and currentX for AI
-        carMesh.userData.targetX = startX;
-        carMesh.userData.currentX = startX;
+        carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
     }
     
-    /** * Checks if spawning a car in a given lane adheres to the minimum separation rules. */
+    /** * Checks if spawning a car in a given lane adheres to the minimum separation rules.
+     * Crucially checks for overlapping cars at the far spawn point.
+     * @param {number} laneToSpawn - The lane index we are considering placing a new car.
+     * @returns {boolean} True if it is safe to spawn, false otherwise.
+     */
     function isSpawnSafe(laneToSpawn) {
-        // ... (Existing isSpawnSafe code remains here) ...
         const currentLane = laneToSpawn;
         const spawnZ = FAR_Z_SPAWN; 
         
+        // Find existing traffic that is close to the spawn point
         const relevantTraffic = gameState.traffic.filter(car => 
-            car.position.z < PLAYER_Z + 10 
+            car.position.z < PLAYER_Z + 10 // Only consider cars that haven't passed the player yet
         );
         
         for (const car of relevantTraffic) {
             const carZ = car.position.z;
+            // Get the car's collision depth dynamically
             const carDepth = car.userData.collisionDepth || CAR_SIZE.depth;
             
             // 1. Same-Lane Check (Longitudinal Separation)
             if (car.userData.lane === currentLane) {
+                // Check for immediate overlap (car spawning *inside* existing car)
                 if (Math.abs(carZ - spawnZ) < carDepth * 0.5) {
                     return false; 
                 }
+                
+                // Check if the car is too close to the front of the spawn point
                 if (carZ - spawnZ < MIN_LONGITUDINAL_GAP && carZ - spawnZ > 0) {
                     return false; 
                 }
@@ -818,149 +771,29 @@
             const isAdjacent = Math.abs(car.userData.lane - currentLane) === 1;
 
             if (isAdjacent) {
+                // Check if the adjacent car is too close longitudinally
                 if (Math.abs(carZ - spawnZ) < MIN_LATERAL_GAP) {
                     return false;
                 }
             }
         }
         
+        // 3. Playability Check: Ensure a path remains (Don't spawn if all other lanes are blocked near Z=FAR_Z_SPAWN)
         const blockedLanes = new Set(); 
         
         for (const car of relevantTraffic) {
+            // A lane is blocked if a car is within the generous longitudinal gap distance
             if (Math.abs(car.position.z - spawnZ) < MIN_LONGITUDINAL_GAP * 0.75) { 
                 blockedLanes.add(car.userData.lane);
             }
         }
         
+        // If all lanes are blocked, it's impossible to pass through the spawn zone.
         if (blockedLanes.size === LANE_COUNT) {
             return false;
         }
 
         return true; 
-    }
-
-    // Detail 11: Checks if a traffic car can safely switch to a new lane.
-    function isLaneChangeSafe(car, newLane, deltaTime) {
-        const currentLane = car.userData.lane;
-        const targetX = gameState.playerCar.lanePositions[newLane];
-        const carWidth = CAR_SIZE.width; // Use a conservative width
-        
-        // 1. Check if the target X position is clear of all traffic.
-        // We only check for cars in the target lane and adjacent to the car's Z position.
-        const trafficAhead = gameState.traffic.filter(otherCar => 
-            otherCar !== car && 
-            (otherCar.userData.lane === newLane || otherCar.userData.lane === currentLane)
-        );
-
-        const carDepth = car.userData.collisionDepth || CAR_SIZE.depth;
-        const lookAheadDistance = carDepth * 3; // Check three car lengths ahead
-
-        for (const otherCar of trafficAhead) {
-            const otherCarZ = otherCar.position.z;
-            const otherDepth = otherCar.userData.collisionDepth || CAR_SIZE.depth;
-
-            // Longitudinal check: Is the other car too close?
-            if (Math.abs(car.position.z - otherCarZ) < carDepth + otherDepth) {
-                // Lateral check: If the other car is in the target lane
-                if (otherCar.userData.lane === newLane) {
-                    return false;
-                }
-            }
-
-            // Check if there's space ahead in the current lane to prevent crashing before switching
-            if (otherCar.userData.lane === currentLane && 
-                otherCar.position.z > car.position.z &&
-                otherCar.position.z - car.position.z < lookAheadDistance) 
-            {
-                // If the car ahead is much slower than the current car, it might be safer to switch
-                const currentCarSpeed = gameState.playerSpeedUnits - TRAFFIC_SPEED; 
-                if (currentCarSpeed > 5) {
-                    return true; // We must switch, current lane is blocked
-                }
-            }
-        }
-
-        // 2. Check if the target position is clear of the player car (especially critical near the player)
-        const player = gameState.playerCar.mesh;
-        const playerZ = PLAYER_Z;
-        const playerDepth = CAR_SIZE.depth;
-        
-        // Simplified check: If traffic car is near the player, assume danger
-        if (Math.abs(car.position.z - playerZ) < carDepth * 2) {
-            return false; 
-        }
-
-        return true; 
-    }
-
-
-    // Detail 1: Implements traffic AI (lane switching logic)
-    function updateTrafficAI(carMesh, deltaTime) {
-        const { userData } = carMesh;
-        
-        // 1. Update lateral position (smooth lane switch)
-        userData.currentX += (userData.targetX - userData.currentX) * TRAFFIC_LANE_CHANGE_RATE * deltaTime * 10;
-        carMesh.position.x = userData.currentX;
-
-        // 2. Blinker Logic (Detail 3)
-        gameState.lastBlinkerToggle += deltaTime;
-        const blinkerLeft = carMesh.getObjectByName('blinkerLeft');
-        const blinkerRight = carMesh.getObjectByName('blinkerRight');
-
-        if (gameState.lastBlinkerToggle > BLINKER_INTERVAL) {
-            if (userData.isSwitching) {
-                // Flash the appropriate blinker
-                if (userData.targetLane > userData.lane) {
-                    if (blinkerRight) blinkerRight.visible = !blinkerRight.visible;
-                } else if (userData.targetLane < userData.lane) {
-                    if (blinkerLeft) blinkerLeft.visible = !blinkerLeft.visible;
-                }
-            } else {
-                if (blinkerLeft) blinkerLeft.visible = false;
-                if (blinkerRight) blinkerRight.visible = false;
-            }
-            gameState.lastBlinkerToggle = 0;
-        }
-
-        // 3. Lane Switching Decision
-        if (userData.isSwitching && Math.abs(userData.targetX - userData.currentX) < 0.05) {
-            // Lane switch completed
-            userData.lane = userData.targetLane;
-            userData.isSwitching = false;
-            userData.laneChangeTimer = TRAFFIC_CHANGE_DECISION_INTERVAL + Math.random() * 2;
-        }
-
-        userData.laneChangeTimer -= deltaTime;
-
-        if (!userData.isSwitching && userData.laneChangeTimer <= 0) {
-            // Time to make a decision
-            const currentLane = userData.lane;
-            const availableLanes = [];
-            
-            // Try to switch to an adjacent lane, 50/50 left/right preference
-            let preferredDirection = Math.random() < 0.5 ? -1 : 1;
-            
-            for (let i = 0; i < LANE_COUNT; i++) {
-                const laneCandidate = (currentLane + i * preferredDirection + LANE_COUNT) % LANE_COUNT;
-                if (laneCandidate !== currentLane) {
-                    availableLanes.push(laneCandidate);
-                }
-            }
-
-            for (const newLane of availableLanes) {
-                if (isLaneChangeSafe(carMesh, newLane, deltaTime)) {
-                    userData.targetLane = newLane;
-                    userData.targetX = gameState.playerCar.lanePositions[newLane];
-                    userData.isSwitching = true;
-                    // Reset timer, but let the blinker flash for a bit before the switch is 'complete'
-                    userData.laneChangeTimer = 0; 
-                    return; 
-                }
-            }
-            
-            // If no switch, reset timer for next check
-            userData.laneChangeTimer = 1.0; 
-        }
     }
 
 
@@ -992,39 +825,15 @@
         const roadMoveDistance = playerSpeedUnits * deltaTime;
         
         // 4. Move and Check Traffic Cars
-        gameState.nearMissTimer = Math.max(0, gameState.nearMissTimer - deltaTime);
-
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
-            // Detail 1: Update traffic car AI
-            updateTrafficAI(carMesh, deltaTime);
-
-            // Move car along Z-axis
             carMesh.position.z += trafficRelativeMoveDistance; 
             
-            // Detail 20: Wheel rotation
-            carMesh.children.filter(c => c.userData.isWheel).forEach(wheel => {
-                // Rotation angle is proportional to the distance traveled
-                const circumference = 2 * Math.PI * (CAR_SIZE.width * 0.15); 
-                const rotations = trafficRelativeMoveDistance / circumference;
-                wheel.rotation.x += rotations * Math.PI * 2; 
-            });
-
-
-            // Collision and Near-Miss Check
-            const collisionResult = checkCollision(playerCar.mesh, carMesh, true);
-
-            if (collisionResult === 'hit') {
-                // Detail 14: Camera Shake on collision
-                applyCameraShake(0.3);
+            if (checkCollision(playerCar.mesh, carMesh)) {
                 gameState.isGameOver = true;
                 showGameOverScreen();
                 return;
-            } else if (collisionResult === 'near-miss' && gameState.nearMissTimer === 0) {
-                // Detail 19: Activate near-miss bonus
-                gameState.nearMissTimer = 1.5; // Bonus lasts for 1.5 seconds
-                gameState.currentScoreMultiplier = NEAR_MISS_SCORE_MULTIPLIER;
             }
 
             if (carMesh.position.z > DESPAWN_Z) {
@@ -1033,7 +842,30 @@
             }
         }
 
-        // 5. Move Lane Lines and Background Elements (Infinite Road Effect)
+        // 5. Handle Traffic Spawning 
+        gameState.lastTrafficSpawn += deltaTime;
+        const requiredTime = BASE_SPAWN_INTERVAL / Math.pow(TRAFFIC_MULTIPLIER, gameState.level - 1); 
+
+        if (gameState.lastTrafficSpawn > requiredTime) {
+            let newLane = Math.floor(Math.random() * LANE_COUNT);
+            let attempts = 0;
+            const maxAttempts = LANE_COUNT * 2; 
+
+            // Loop to find a safe lane to spawn in
+            while (!isSpawnSafe(newLane) && attempts < maxAttempts) {
+                newLane = (newLane + 1) % LANE_COUNT; // Cycle to the next lane
+                attempts++;
+            }
+
+            // Only spawn if a safe lane was found within attempts
+            if (isSpawnSafe(newLane)) {
+                createTrafficCar(newLane);
+            }
+            
+            gameState.lastTrafficSpawn = 0; 
+        }
+
+        // 6. Move Lane Lines and Background Elements (Infinite Road Effect)
         scene.children.forEach(child => {
             if (child.userData.isLaneLine) {
                 const totalZExtent = child.userData.totalZExtent;
@@ -1046,63 +878,17 @@
             } else if (child.userData.isBackgroundElement && child !== grassMesh) {
                 child.position.z += roadMoveDistance; 
                 if (child.position.z > DESPAWN_Z) {
-                    child.position.z -= ROAD_DEPTH + 30; 
+                    child.position.z -= ROAD_DEPTH + 30; // Wrap back to the far end
                 }
             }
         });
         
-        // 6. Player Car Wheel Rotation (Detail 20)
-        playerCar.mesh.children.filter(c => c.userData.isWheel).forEach(wheel => {
-            const circumference = 2 * Math.PI * (CAR_SIZE.width * 0.15);
-            const rotations = roadMoveDistance / circumference;
-            wheel.rotation.x += rotations * Math.PI * 2; 
-        });
-
         // 7. Update Weather Particles
         updateWeatherParticles(deltaTime);
-        
-        // 8. Handle Score Multiplier visual (Detail 19)
-        if (gameState.nearMissTimer > 0) {
-             nearMissDisplayEl.style.opacity = 1;
-             nearMissDisplayEl.textContent = `NEAR MISS! X${NEAR_MISS_SCORE_MULTIPLIER}`;
-        } else {
-            nearMissDisplayEl.style.opacity = 0;
-            gameState.currentScoreMultiplier = 1.0;
-        }
     }
     
-    // Detail 14: Camera Shake effect
-    function applyCameraShake(duration, intensity = 0.05) {
-        if (camera.userData.isShaking) return;
-        camera.userData.isShaking = true;
-        let shakeTime = 0;
-        
-        const shakeLoop = () => {
-            if (shakeTime >= duration) {
-                camera.position.x = 0; 
-                camera.position.y = 2.5;
-                camera.userData.isShaking = false;
-                return;
-            }
-
-            const xOffset = Math.random() * intensity * 2 - intensity;
-            const yOffset = Math.random() * intensity * 2 - intensity;
-            
-            camera.position.x = xOffset;
-            camera.position.y = 2.5 + yOffset;
-            camera.lookAt(0, 0.5, 0);
-
-            shakeTime += clock.getDelta();
-            requestAnimationFrame(shakeLoop);
-        };
-
-        requestAnimationFrame(shakeLoop);
-    }
-
-
     /** Animates and wraps the rain/snow particles. */
     function updateWeatherParticles(deltaTime) {
-        // ... (Existing updateWeatherParticles code remains here) ...
         if (!gameState.weatherParticles) return;
 
         const env = ENVIRONMENTS[gameState.currentEnvironmentIndex];
@@ -1125,13 +911,16 @@
             positions[i + 2] += particleSpeed;
             positions[i + 1] += yOffset; 
             
+            // Add slight horizontal drift for effect
             positions[i] += Math.sin(positions[i + 2] * 0.1 + clock.getElapsedTime() * 0.5) * 0.05 * deltaTime * 60;
 
+            // Wrap Z position
             if (positions[i + 2] > PLAYER_Z + 5) {
                 positions[i + 2] -= zWrap;
                 positions[i + 1] = 15 + Math.random() * 10;
             }
             
+            // Wrap Y position
             if (positions[i + 1] < 0) {
                 positions[i + 1] = 15 + Math.random() * 10;
             }
@@ -1141,60 +930,60 @@
     }
 
     /** Checks for collision between player car and traffic car (AABB simple check) */
-    function checkCollision(player, trafficMesh, checkForNearMiss = false) {
+    function checkCollision(player, trafficMesh) {
         const playerZ = PLAYER_Z; 
         const trafficZ = trafficMesh.position.z;
         const halfWidth = CAR_SIZE.width / 2;
-        const halfPlayerDepth = CAR_SIZE.depth / 2;
+        const halfDepth = CAR_SIZE.depth / 2;
         
+        // Use the car's dynamic collision depth (set in createCarMesh/createTruckMesh)
         const trafficCollisionDepth = trafficMesh.userData.collisionDepth || CAR_SIZE.depth; 
         const trafficHalfDepth = trafficCollisionDepth / 2; 
 
-        // 1. X-axis overlap check
+        // 1. X-axis overlap check (simple check for same lane)
         const playerMinX = player.position.x - halfWidth * 0.9; 
         const playerMaxX = player.position.x + halfWidth * 0.9;
         const trafficMinX = trafficMesh.position.x - halfWidth * 0.9;
         const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9;
 
         const xOverlap = Math.max(0, Math.min(playerMaxX, trafficMaxX) - Math.max(playerMinX, trafficMinX));
-        const zOverlapAllowance = 0.1; // Tolerance for collision
 
         if (xOverlap > CAR_SIZE.width * 0.1) {
             // 2. Z-axis overlap
-            const playerFrontZ = playerZ + halfPlayerDepth;
-            const playerBackZ = playerZ - halfPlayerDepth;
+            const playerFrontZ = playerZ + halfDepth;
+            const playerBackZ = playerZ - halfDepth;
+            
+            // Use trafficHalfDepth for traffic car
             const trafficFrontZ = trafficZ + trafficHalfDepth;
             const trafficBackZ = trafficZ - trafficHalfDepth;
 
-            if (playerFrontZ > trafficBackZ + zOverlapAllowance && playerBackZ < trafficFrontZ - zOverlapAllowance) {
-                return 'hit';
-            }
-            
-            // Detail 19: Near-miss check (Player passed close to a car)
-            if (checkForNearMiss) {
-                const longitudinalGap = Math.abs(playerZ - trafficZ) - (halfPlayerDepth + trafficHalfDepth);
-                if (longitudinalGap > 0 && longitudinalGap < NEAR_MISS_DISTANCE && xOverlap > CAR_SIZE.width * 0.5) {
-                    return 'near-miss';
-                }
+            // Use a slight tolerance to ensure the collision is forgiving but solid
+            if (playerFrontZ > trafficBackZ + 0.1 && playerBackZ < trafficFrontZ - 0.1) {
+                return true;
             }
         }
-        return 'none';
+        return false;
     }
 
 
     /** Updates UI elements and checks for level progression. */
     function updateUI(deltaTime) {
-        const { score, level, playerSpeedUnits, currentScoreMultiplier } = gameState;
+        const { score, level, playerSpeedUnits } = gameState;
         
-        // Score update (Detail 19: Apply score multiplier)
-        gameState.score += playerSpeedUnits * deltaTime * 10 * currentScoreMultiplier; 
-        scoreEl.textContent = Math.floor(gameState.score);
+        // Score update
+        gameState.score += playerSpeedUnits * deltaTime * 10; 
+        const floorScore = Math.floor(gameState.score);
+        scoreEl.textContent = floorScore;
+
+        // >> START UPDATE: Display best score during game
+        bestScoreEl.textContent = Math.floor(bestScore);
+        // >> END UPDATE
         
         // Speed update
         speedValueEl.textContent = Math.floor(playerSpeedUnits * SPEED_UNIT_TO_MPH);
 
         // Level check
-        const newLevel = Math.floor(score / 3500) + 1; 
+        const newLevel = Math.floor(score / 3500) + 1; // Slightly increased score needed for next level
         if (newLevel > level) {
             gameState.level = newLevel;
             levelEl.textContent = gameState.level;
@@ -1206,6 +995,7 @@
 
     // --- GAME CONTROL FUNCTIONS ---
     
+    // >> START ADDITION: Keybinding Functions
     /** Global function to update keybindings from the settings menu. */
     window.updateKeybinding = function(action, elementId) {
         const button = document.getElementById(elementId);
@@ -1215,10 +1005,11 @@
         const handler = (e) => {
             const newKey = e.key;
             
+            // Check for duplicate keys (prevent same key for different actions)
             for (const key in gameState.keyBindings) {
                 if (key !== action && gameState.keyBindings[key] === newKey) {
                     alert(`Key '${newKey}' is already used for ${key.toUpperCase()}.`);
-                    button.textContent = originalText; 
+                    button.textContent = originalText; // Revert to current key
                     document.removeEventListener('keydown', handler);
                     return;
                 }
@@ -1227,20 +1018,22 @@
             gameState.keyBindings[action] = newKey;
             button.textContent = newKey;
 
+            // Update controls info immediately if visible
             updateControlsInfo(); 
             
             document.removeEventListener('keydown', handler);
         };
 
+        // Temporarily remove focus from the button to ensure keydown is captured on the document
         button.blur(); 
         
+        // Remove old listener if any and add new one
         document.removeEventListener('keydown', handler);
         document.addEventListener('keydown', handler, { once: true });
     };
 
     /** Updates the on-screen controls info with the current keybindings. */
     function updateControlsInfo() {
-        // ... (Existing updateControlsInfo code remains here) ...
         const gasKey = gameState.keyBindings.gas;
         const leftKey = gameState.keyBindings.left;
         const rightKey = gameState.keyBindings.right;
@@ -1251,19 +1044,22 @@
 
         controlsInfoEl.innerHTML = `<p class="font-semibold">Controls: **Gas:** ${gasDisplay} (or Hold) | **Steer:** ${leftDisplay}/${rightDisplay}</p>`;
     }
+    // >> END ADDITION: Keybinding Functions
 
 
     /** Shows the main menu screen. */
     function showMainMenu() {
-        // ... (Existing showMainMenu code remains here) ...
+        // Ensure UI elements are hidden
         infoPanelEl.classList.add('hidden');
         controlsInfoEl.classList.add('hidden');
         pedalsContainerEl.classList.add('hidden');
-        nearMissDisplayEl.style.opacity = 0;
         
+        // Clear old scene items (if any are left from a crash/restart)
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
+            // >> START ADDITION: Include road details in cleanup
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
+            // >> END ADDITION
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
@@ -1274,9 +1070,9 @@
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-center text-white w-11/12 md:w-96">
                     <h1 class="text-6xl font-extrabold mb-4 text-yellow-400 tracking-wider shadow-white">RADIAL RACE</h1>
-                    <p class="text-xl text-gray-300 mb-2">Endless high-speed highway action.</p>
-                    <p class="text-lg text-yellow-300 font-bold mb-8">HIGH SCORE: ${gameState.highScore}</p>
+                    <p class="text-xl text-gray-300 mb-4">Endless high-speed highway action.</p>
                     
+                    <p class="text-2xl text-red-400 font-bold mb-8">BEST SCORE: ${Math.floor(bestScore)}</p>
                     <div class="space-y-4">
                         <button onclick="startGame()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg shadow-lg transition duration-200 text-xl tracking-wider">
                             START RACE
@@ -1295,7 +1091,6 @@
 
     /** Shows the instructions modal. */
     window.showHowToPlay = function() {
-        // ... (Existing showHowToPlay code remains here) ...
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-white w-11/12 md:w-1/3">
@@ -1310,7 +1105,7 @@
                                 <span class="font-bold text-yellow-300">STEERING:</span> Use <span class="font-mono bg-gray-800 px-2 py-1 rounded">LEFT Key (${gameState.keyBindings.left})</span> / <span class="font-mono bg-gray-800 px-2 py-1 rounded">RIGHT Key (${gameState.keyBindings.right})</span> to switch lanes.
                             </li>
                             <li class="p-3 bg-gray-700 rounded-lg">
-                                <span class="font-bold text-red-300">OBJECTIVE:</span> Avoid traffic. Your score is based on distance traveled at speed. **Near Misses give a temporary X${NEAR_MISS_SCORE_MULTIPLIER} score multiplier!**
+                                <span class="font-bold text-red-300">OBJECTIVE:</span> Avoid traffic. Your score is based on distance traveled at speed.
                             </li>
                             <li class="p-3 bg-gray-700 rounded-lg">
                                 <span class="font-bold text-indigo-300">PAUSE:</span> Press the <span class="font-mono bg-gray-800 px-2 py-1 rounded">SPACEBAR</span> at any time.
@@ -1324,9 +1119,9 @@
         `;
     }
 
+    // >> START ADDITION: Settings Menu Function
     /** Shows the settings menu modal for keybinding customization. */
     window.showSettingsMenu = function() {
-        // ... (Existing showSettingsMenu code remains here) ...
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card rounded-2xl p-8 md:p-12 text-white w-11/12 md:w-1/3">
@@ -1362,11 +1157,11 @@
             </div>
         `;
     }
+    // >> END ADDITION: Settings Menu Function
 
 
     /** Toggles the game's paused state and shows the modal. */
     window.togglePause = function() {
-        // ... (Existing togglePause code remains here) ...
         if (gameState.isGameOver) return; 
 
         gameState.isPaused = !gameState.isPaused;
@@ -1392,25 +1187,31 @@
 
     /** Displays the Game Over modal */
     function showGameOverScreen() {
-        // Detail 12, 13: Update and display High Score
-        if (gameState.score > gameState.highScore) {
-            gameState.highScore = Math.floor(gameState.score);
-            localStorage.setItem('radialRacerHighScore', gameState.highScore);
-            highScoreDisplayEl.textContent = gameState.highScore;
+        // >> START ADDITION: Check and update best score on game over
+        const isNewBest = updateBestScore(gameState.score);
+        const finalScore = Math.floor(gameState.score);
+        const bestDisplay = Math.floor(bestScore);
+        
+        let message = `Final Score: <span class="text-yellow-400 font-extrabold">${finalScore}</span>`;
+        if (isNewBest) {
+            message = `<span class="text-green-400 text-3xl font-extrabold block mb-2">NEW BEST SCORE!</span><span class="text-yellow-400 font-extrabold">${finalScore}</span>`;
+        } else {
+            message += `<br>Best Score: <span class="text-red-400 font-bold">${bestDisplay}</span>`;
         }
+        // >> END ADDITION
 
         modalContainerEl.innerHTML = `
             <div class="modal-overlay">
                 <div class="menu-card bg-red-900 border-2 border-red-500 rounded-xl p-10 text-center text-white shadow-2xl z-50 w-11/12 md:w-1/3">
                     <h2 class="text-5xl font-extrabold mb-4 text-red-300">CRASH! GAME OVER!</h2>
-                    <p class="text-2xl mb-2">Final Score: <span class="text-yellow-400 font-extrabold">${Math.floor(gameState.score)}</span></p>
-                    <p class="text-xl mb-6 text-yellow-300 font-bold">HIGH SCORE: ${gameState.highScore}</p>
+                    <p class="text-2xl mb-6">${message}</p>
                     <button onclick="showMainMenu()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
             </div>
         `;
         pauseButtonEl.textContent = 'CRASHED';
         cancelAnimationFrame(animationFrameId);
+        // Hide game UI when game is over
         infoPanelEl.classList.add('hidden');
         controlsInfoEl.classList.add('hidden');
         pedalsContainerEl.classList.add('hidden');
@@ -1418,16 +1219,19 @@
     
     /** Resets the game state and initializes all objects for a new game. */
     window.startGame = function() {
-        // ... (Existing startGame code remains here) ...
+        // Clear all scene dynamic items 
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
+            // >> START UPDATE: Cleanup now includes isRoadDetail
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
+            // >> END UPDATE
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
             }
         }
         
+        // Reset state variables
         gameState.score = 0;
         gameState.level = 1;
         gameState.isGameOver = false;
@@ -1435,19 +1239,17 @@
         gameState.traffic = [];
         gameState.backgroundElements = [];
         gameState.lastTrafficSpawn = 0;
-        // Detail 19: Reset score multiplier
-        gameState.nearMissTimer = 0;
-        gameState.currentScoreMultiplier = 1.0;
-        nearMissDisplayEl.style.opacity = 0;
         cleanupWeather(); 
 
         scaleGameSpeed(); 
         gameState.playerSpeedUnits = IDLE_PLAYER_SPEED;
         
+        // Setup lanes if first run
         if (gameState.playerCar.lanePositions.length === 0) {
             calculateLanePositions();
         }
 
+        // Create player car (distinct blue) - Use the isPlayer flag to ensure it's a generic car
         gameState.playerCar.mesh = createCarMesh(0x3498db, true); 
         gameState.playerCar.lane = 1;
         gameState.playerCar.mesh.position.set(gameState.playerCar.lanePositions[gameState.playerCar.lane], 0, PLAYER_Z);
@@ -1455,19 +1257,25 @@
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         scene.add(gameState.playerCar.mesh);
 
+        // Rebuild static scene elements
         createRoad();
         updateEnvironment(1); 
         
+        // Update UI visibility
         infoPanelEl.classList.remove('hidden');
         controlsInfoEl.classList.remove('hidden');
         pedalsContainerEl.classList.remove('hidden');
         scoreEl.textContent = 0;
         levelEl.textContent = 1;
+        bestScoreEl.textContent = Math.floor(bestScore); // Ensure best score is displayed
         modalContainerEl.innerHTML = '';
         pauseButtonEl.textContent = 'PAUSE (Space)';
         
+        // >> START ADDITION: Initialize controls info
         updateControlsInfo(); 
+        // >> END ADDITION
 
+        // Reset pedal visuals
         gasPedalEl.classList.remove('active', 'bg-green-500');
         brakePedalEl.classList.add('active', 'bg-red-500'); 
         
@@ -1479,7 +1287,6 @@
     // --- MAIN GAME LOOP ---
 
     function gameLoop() {
-        // ... (Existing gameLoop code remains here) ...
         if (gameState.isGameOver || gameState.isPaused) {
             cancelAnimationFrame(animationFrameId);
             return;
@@ -1487,10 +1294,13 @@
         
         const deltaTime = clock.getDelta(); 
         
+        // 1. Update all game physics and movement
         updateMotion(deltaTime);
         
+        // 2. Update all UI displays and check for progression
         updateUI(deltaTime);
 
+        // 3. Render the 3D scene
         renderer.render(scene, camera);
 
         animationFrameId = requestAnimationFrame(gameLoop);
@@ -1500,9 +1310,9 @@
     // --- INPUT HANDLING ---
 
     document.addEventListener('keydown', (e) => {
-        // ... (Existing keydown code remains here) ...
         if (gameState.isGameOver) return;
         
+        // Spacebar is always pause/resume regardless of keybindings
         if (e.key === ' ' || e.key === 'Spacebar') {
             e.preventDefault();
             togglePause();
@@ -1513,15 +1323,17 @@
 
         let newLane = gameState.playerCar.lane;
 
+        // >> START UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.left) {
             newLane = Math.max(0, gameState.playerCar.lane - 1);
         } else if (e.key === gameState.keyBindings.right) {
             newLane = Math.min(LANE_COUNT - 1, gameState.playerCar.lane + 1);
         } else if (e.key === gameState.keyBindings.gas) {
             gameState.isGassing = true;
-        } else if (e.key === 'ArrowDown') { 
+        } else if (e.key === 'ArrowDown') { // Always allow ArrowDown as a universal 'brake' key
             gameState.isGassing = false; 
         }
+        // >> END UPDATED KEYBINDINGS
         
         if (newLane !== gameState.playerCar.lane) {
             gameState.playerCar.lane = newLane;
@@ -1530,16 +1342,21 @@
     });
     
     document.addEventListener('keyup', (e) => {
-        // ... (Existing keyup code remains here) ...
+        // >> START UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.gas) {
             gameState.isGassing = false;
         }
+        // >> END UPDATED KEYBINDINGS
     });
 
     // --- INITIALIZATION ---
 
+    // Start the game by showing the main menu
     window.onload = function () {
         initThreeJS();
+        // >> START ADDITION: Load best score before showing main menu
+        loadBestScore();
+        // >> END ADDITION
         showMainMenu(); 
     }
 </script>
