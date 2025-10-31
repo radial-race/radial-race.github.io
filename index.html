@@ -120,8 +120,8 @@
     let scene, camera, renderer, clock, animationFrameId;
 
     // --- BASE GAME CONSTANTS ---
-    const LANE_COUNT = 10; // MODIFIED: Increased from 4 to 10
-    const ROAD_WIDTH = 15; // MODIFIED: Increased from 6 to 15 for 10-lane visibility
+    const LANE_COUNT = 10; 
+    const ROAD_WIDTH = 15; 
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
     const SPEED_UNIT_TO_MPH = 5.33; 
@@ -481,27 +481,27 @@
         const initialEnv = ENVIRONMENTS[0];
         scene.fog = new THREE.Fog(initialEnv.skyColor, ROAD_DEPTH * initialEnv.fogNear, ROAD_DEPTH * initialEnv.fogFar);
         
-        // >> START MODIFICATION: Switch to Orthographic Camera for Top-Down View
+        // >> START MODIFICATION: Revert to Perspective Camera for Chase View
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
         const aspect = initialWidth / initialHeight;
         
-        // This defines the "view box" height. The width will be calculated from this.
-        const viewHeight = 25; // How many units "tall" the view is.
-        const viewWidth = viewHeight * aspect;
-
-        camera = new THREE.OrthographicCamera(
-            -viewWidth / 2,  // left
-             viewWidth / 2,  // right
-             viewHeight / 2, // top
-            -viewHeight / 2, // bottom
-            0.1,             // near
-            ROAD_DEPTH + 50  // far
+        // Use PerspectiveCamera again
+        camera = new THREE.PerspectiveCamera(
+            75,         // fov (Field of View)
+            aspect,     // aspect ratio
+            0.1,        // near clipping plane
+            ROAD_DEPTH + 50 // far clipping plane
         );
 
-        // Position the camera high up (Y=25) and looking straight down
-        camera.position.set(0, 25, PLAYER_Z); 
-        camera.lookAt(0, 0, PLAYER_Z); // Look at the player's Z-plane
+        // Position it "barely over" and slightly behind the car
+        // Player is at PLAYER_Z (which is 10)
+        // So we set camera Y=4 (low), Z=15 (5 units behind the player)
+        camera.position.set(0, 4, PLAYER_Z + 5); 
+        
+        // Look *forward* from the car's position, slightly down
+        // We look at Y=2, and 10 units *in front* of the player (Z=0)
+        camera.lookAt(0, 2, PLAYER_Z - 10); 
         // >> END MODIFICATION
 
         // Renderer setup
@@ -524,15 +524,15 @@
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
         
-        // >> START MODIFICATION: Improve shadow quality for top-down view
-        directionalLight.shadow.mapSize.width = 2048; // Increase resolution
+        // >> START MODIFICATION: Improve shadow quality (Kept from previous version)
+        directionalLight.shadow.mapSize.width = 2048; 
         directionalLight.shadow.mapSize.height = 2048;
-        directionalLight.shadow.camera.left = -ROAD_WIDTH * 1.5; // Widen shadow area
+        directionalLight.shadow.camera.left = -ROAD_WIDTH * 1.5; 
         directionalLight.shadow.camera.right = ROAD_WIDTH * 1.5;
         directionalLight.shadow.camera.top = 20; 
         directionalLight.shadow.camera.bottom = -20;
         directionalLight.shadow.camera.near = 1;
-        directionalLight.shadow.camera.far = 40; // Increase range
+        directionalLight.shadow.camera.far = 40; 
         // >> END MODIFICATION
         
         scene.add(directionalLight);
@@ -544,16 +544,8 @@
         const newWidth = window.innerWidth;
         const newHeight = window.innerHeight;
 
-        // >> START MODIFICATION: Update Orthographic Camera properties
-        const aspect = newWidth / newHeight;
-        // This must match the viewHeight in initThreeJS
-        const viewHeight = 25; 
-        const viewWidth = viewHeight * aspect;
-
-        camera.left = -viewWidth / 2;
-        camera.right = viewWidth / 2;
-        camera.top = viewHeight / 2;
-        camera.bottom = -viewHeight / 2;
+        // >> START MODIFICATION: Update Perspective Camera properties
+        camera.aspect = newWidth / newHeight;
         // >> END MODIFICATION
 
         camera.updateProjectionMatrix();
@@ -726,7 +718,7 @@
 
         carMesh.userData.lane = lane; 
         
-        // >> START ADDITION: Add state for lane changing AI
+        // >> START ADDITION: Add state for lane changing AI (Kept from previous)
         carMesh.userData.isChangingLanes = false;
         carMesh.userData.targetX = carMesh.position.x;
         // Time before next decision
@@ -802,7 +794,7 @@
         return true; 
     }
     
-    // >> START ADDITION: NPC Lane Change Safety Check
+    // >> START ADDITION: NPC Lane Change Safety Check (Kept from previous)
     /**
      * Checks if it's safe for an NPC car to move into a target lane.
      * @param {THREE.Mesh} car - The NPC car that wants to change lanes.
@@ -863,12 +855,20 @@
         playerCar.currentX += (playerCar.targetX - playerCar.currentX) * playerCar.moveSpeed * deltaTime;
         playerCar.mesh.position.x = playerCar.currentX;
 
-        // >> START ADDITION: Camera Follow Logic
-        // Make camera X position match player's smoothed X position
+        // >> START MODIFICATION: Camera Follow Logic (Chase Cam)
+        // Camera X position matches player's smoothed X position
         camera.position.x = playerCar.currentX;
-        // Make camera look at the player's X/Z plane
-        camera.lookAt(playerCar.currentX, 0, PLAYER_Z); 
-        // >> END ADDITION
+        
+        // The camera needs to look *at* a point in front of the car,
+        // while also matching the car's X position.
+        // We create a "lookAt" target vector.
+        const lookAtTarget = new THREE.Vector3(
+            playerCar.currentX, // Match car's X
+            2,                  // Look slightly down (Y=2)
+            PLAYER_Z - 10       // Look 10 units in front of the player
+        );
+        camera.lookAt(lookAtTarget);
+        // >> END MODIFICATION
 
         // 3. Motion Calculations
         const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
@@ -881,7 +881,7 @@
             // Z-axis movement
             carMesh.position.z += trafficRelativeMoveDistance; 
             
-            // >> START ADDITION: NPC Lane Change AI
+            // >> START ADDITION: NPC Lane Change AI (Kept from previous)
             carMesh.userData.lastLaneChangeDecision += deltaTime;
             
             // A. Check if it's time to make a decision
@@ -1035,7 +1035,7 @@
         const trafficHalfDepth = trafficCollisionDepth / 2; 
 
         // 1. X-axis overlap check
-        // >> START MODIFICATION: Use the traffic's current X position for collision
+        // >> START MODIFICATION: Use the traffic's current X position for collision (Kept)
         const playerMinX = player.position.x - halfWidth * 0.9; 
         const playerMaxX = player.position.x + halfWidth * 0.9;
         const trafficMinX = trafficMesh.position.x - halfWidth * 0.9; // Use position.x, not lane
@@ -1327,10 +1327,20 @@
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         scene.add(gameState.playerCar.mesh);
         
-        // >> START ADDITION: Reset camera position to player start
+        // >> START MODIFICATION: Reset camera position to player start
         camera.position.x = gameState.playerCar.currentX;
-        camera.lookAt(gameState.playerCar.currentX, 0, PLAYER_Z);
-        // >> END ADDITION
+        // We also need to reset the Y and Z positions to the default chase cam angle
+        camera.position.y = 4;
+        camera.position.z = PLAYER_Z + 5;
+        
+        // And reset the lookAt target
+        const lookAtTarget = new THREE.Vector3(
+            gameState.playerCar.currentX,
+            2,
+            PLAYER_Z - 10
+        );
+        camera.lookAt(lookAtTarget);
+        // >> END MODIFICATION
 
         // Rebuild static scene elements
         createRoad();
