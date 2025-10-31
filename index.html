@@ -123,9 +123,7 @@
     const LANE_COUNT = 10; // MODIFIED: Increased from 4 to 10
     const ROAD_WIDTH = 15; // MODIFIED: Increased from 6 to 15 for 10-lane visibility
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
-    // >> START ADDITION: TRUCK SIZE
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
-    // >> END ADDITION
     const SPEED_UNIT_TO_MPH = 5.33; 
     
     // Fixed road color (Classic Road as requested)
@@ -141,19 +139,24 @@
 
     // Depth and Positioning
     const ROAD_DEPTH = 150; 
-    const PLAYER_Z = 10;    // MODIFIED: Increased from 3 to 10
-    const DESPAWN_Z = 12;   // Increased from 5
+    const PLAYER_Z = 10;    
+    const DESPAWN_Z = 12;   
     const FAR_Z_SPAWN = -120; // Spawn further out
     const DETAIL_COUNT = 40; 
     
     // Traffic Intensity (ADJUSTED for smoother difficulty ramp)
-    const BASE_SPAWN_INTERVAL = 0.55; // Increased from 0.45 
-    const TRAFFIC_MULTIPLIER = 1.20; // Reduced from 1.35 (slower difficulty ramp)
+    const BASE_SPAWN_INTERVAL = 0.55; 
+    const TRAFFIC_MULTIPLIER = 1.20; 
     
     // **ADJUSTED:** Minimum required Z-gap for the longitudinal buffer (3.5 car lengths)
     const MIN_LONGITUDINAL_GAP = CAR_SIZE.depth * 3.5; 
     // **ADJUSTED:** Minimum required Z-gap for the lateral buffer (1.2 car lengths)
     const MIN_LATERAL_GAP = CAR_SIZE.depth * 1.2; 
+    
+    // >> START ADDITION: NPC Lane Change Constants
+    // Minimum Z gap for an NPC to change lanes (relative to other NPCs or player)
+    const NPC_MIN_Z_CHANGE_GAP = MIN_LONGITUDINAL_GAP * 1.2; 
+    // >> END ADDITION
 
     // --- ENVIRONMENT PRESETS ---
     const ENVIRONMENTS = [
@@ -177,16 +180,14 @@
         backgroundElements: [],
         weatherParticles: null,
         currentEnvironmentIndex: 0,
-        // >> START ADDITION: Keybindings
         keyBindings: {
             gas: 'ArrowUp',
             left: 'ArrowLeft',
             right: 'ArrowRight'
         },
-        // >> END ADDITION
         playerCar: {
             mesh: null,
-            lane: Math.floor(LANE_COUNT / 2), // Start in the middle lane (4 for 10 lanes)
+            lane: Math.floor(LANE_COUNT / 2), 
             lanePositions: [], 
             targetX: 0,
             currentX: 0,
@@ -227,8 +228,6 @@
         gameState.playerCar.lanePositions = lanePositions;
     }
 
-    // >> START ADDITION: New Car Geometries
-
     /** Creates a generic car mesh (used for player and standard traffic) with body, cabin, and wheels. */
     function createGenericCarMesh(color) {
         const carGroup = new THREE.Group();
@@ -253,7 +252,6 @@
         carGroup.add(cabin);
 
         // Wheels (Simple cylinders)
-        // MODIFIED: Halved the wheel radius from 0.15 to 0.075
         const wheelRadius = CAR_SIZE.width * 0.075; 
         const wheelDepth = 0.1;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
@@ -307,7 +305,6 @@
         carGroup.add(cabin);
         
         // Wheels (Adjusted for truck size)
-        // MODIFIED: Halved the wheel radius from 0.2 to 0.1
         const wheelRadius = CAR_SIZE.width * 0.1; 
         const wheelDepth = 0.15;
         const wheelGeometry = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelDepth, 8);
@@ -365,8 +362,6 @@
         mesh.userData.isCar = true;
         return mesh;
     }
-
-    // >> END ADDITION: New Car Geometries
 
 
     /** Creates a background foliage mesh (tree, flower, or none). */
@@ -486,13 +481,28 @@
         const initialEnv = ENVIRONMENTS[0];
         scene.fog = new THREE.Fog(initialEnv.skyColor, ROAD_DEPTH * initialEnv.fogNear, ROAD_DEPTH * initialEnv.fogFar);
         
-        // Camera setup
+        // >> START MODIFICATION: Switch to Orthographic Camera for Top-Down View
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
-        camera = new THREE.PerspectiveCamera(70, initialWidth / initialHeight, 0.1, ROAD_DEPTH + 50);
-        // MODIFIED: Camera moved back and up for 10-lane visibility
-        camera.position.set(0, 4.5, PLAYER_Z + 6); 
-        camera.lookAt(0, 0.5, 0); // Look slightly down
+        const aspect = initialWidth / initialHeight;
+        
+        // This defines the "view box" height. The width will be calculated from this.
+        const viewHeight = 25; // How many units "tall" the view is.
+        const viewWidth = viewHeight * aspect;
+
+        camera = new THREE.OrthographicCamera(
+            -viewWidth / 2,  // left
+             viewWidth / 2,  // right
+             viewHeight / 2, // top
+            -viewHeight / 2, // bottom
+            0.1,             // near
+            ROAD_DEPTH + 50  // far
+        );
+
+        // Position the camera high up (Y=25) and looking straight down
+        camera.position.set(0, 25, PLAYER_Z); 
+        camera.lookAt(0, 0, PLAYER_Z); // Look at the player's Z-plane
+        // >> END MODIFICATION
 
         // Renderer setup
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -513,14 +523,18 @@
         const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 1024;
-        directionalLight.shadow.mapSize.height = 1024;
-        directionalLight.shadow.camera.left = -ROAD_WIDTH * 0.8; // Adjust shadow size to road width
-        directionalLight.shadow.camera.right = ROAD_WIDTH * 0.8;
-        directionalLight.shadow.camera.top = 10;
-        directionalLight.shadow.camera.bottom = -10;
+        
+        // >> START MODIFICATION: Improve shadow quality for top-down view
+        directionalLight.shadow.mapSize.width = 2048; // Increase resolution
+        directionalLight.shadow.mapSize.height = 2048;
+        directionalLight.shadow.camera.left = -ROAD_WIDTH * 1.5; // Widen shadow area
+        directionalLight.shadow.camera.right = ROAD_WIDTH * 1.5;
+        directionalLight.shadow.camera.top = 20; 
+        directionalLight.shadow.camera.bottom = -20;
         directionalLight.shadow.camera.near = 1;
-        directionalLight.shadow.camera.far = 30;
+        directionalLight.shadow.camera.far = 40; // Increase range
+        // >> END MODIFICATION
+        
         scene.add(directionalLight);
     }
     
@@ -530,7 +544,18 @@
         const newWidth = window.innerWidth;
         const newHeight = window.innerHeight;
 
-        camera.aspect = newWidth / newHeight;
+        // >> START MODIFICATION: Update Orthographic Camera properties
+        const aspect = newWidth / newHeight;
+        // This must match the viewHeight in initThreeJS
+        const viewHeight = 25; 
+        const viewWidth = viewHeight * aspect;
+
+        camera.left = -viewWidth / 2;
+        camera.right = viewWidth / 2;
+        camera.top = viewHeight / 2;
+        camera.bottom = -viewHeight / 2;
+        // >> END MODIFICATION
+
         camera.updateProjectionMatrix();
         renderer.setSize(newWidth, newHeight);
     }
@@ -575,7 +600,7 @@
             scene.add(lineGroup);
         }
 
-        // >> START ADDITION: Road Railings (Guardrails)
+        // Road Railings (Guardrails)
         const railingGeometry = new THREE.BoxGeometry(0.15, 0.4, ROAD_DEPTH); 
         const railingMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 }); 
 
@@ -594,7 +619,6 @@
         rightRailing.castShadow = true;
         rightRailing.userData.isRoadDetail = true;
         scene.add(rightRailing);
-        // >> END ADDITION
     }
 
     // --- GAME LOGIC FUNCTIONS ---
@@ -700,7 +724,18 @@
             FAR_Z_SPAWN + carDepth / 2 + Math.random() * 20 
         );
 
-        carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
+        carMesh.userData.lane = lane; 
+        
+        // >> START ADDITION: Add state for lane changing AI
+        carMesh.userData.isChangingLanes = false;
+        carMesh.userData.targetX = carMesh.position.x;
+        // Time before next decision
+        carMesh.userData.lastLaneChangeDecision = 0; 
+        // Decide to change lanes every 3-8 seconds
+        carMesh.userData.timeToNextChange = 3 + Math.random() * 5; 
+        // Slower move speed than player
+        carMesh.userData.moveSpeed = 4 + Math.random() * 4; 
+        // >> END ADDITION
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
@@ -766,6 +801,43 @@
 
         return true; 
     }
+    
+    // >> START ADDITION: NPC Lane Change Safety Check
+    /**
+     * Checks if it's safe for an NPC car to move into a target lane.
+     * @param {THREE.Mesh} car - The NPC car that wants to change lanes.
+     * @param {number} targetLane - The lane index the car wants to move to.
+     * @returns {boolean} True if the lane change is safe, false otherwise.
+     */
+    function isNPCSafeToChange(car, targetLane) {
+        const carZ = car.position.z;
+        
+        // 1. Check against other traffic
+        for (const otherCar of gameState.traffic) {
+            if (otherCar === car) continue; // Don't check against self
+
+            // Check cars in the target lane
+            if (otherCar.userData.lane === targetLane) {
+                const zDiff = Math.abs(otherCar.position.z - carZ);
+                // If longitudinally too close, it's not safe
+                if (zDiff < NPC_MIN_Z_CHANGE_GAP) {
+                    return false;
+                }
+            }
+        }
+
+        // 2. Check against the player
+        if (targetLane === gameState.playerCar.lane) {
+            const zDiff = Math.abs(PLAYER_Z - carZ);
+            // If longitudinally too close to the player, it's not safe
+            if (zDiff < NPC_MIN_Z_CHANGE_GAP) {
+                return false;
+            }
+        }
+        
+        return true; // No conflicts found
+    }
+    // >> END ADDITION
 
 
     /** Moves and wraps all dynamic elements to create the infinite road effect. */
@@ -791,6 +863,13 @@
         playerCar.currentX += (playerCar.targetX - playerCar.currentX) * playerCar.moveSpeed * deltaTime;
         playerCar.mesh.position.x = playerCar.currentX;
 
+        // >> START ADDITION: Camera Follow Logic
+        // Make camera X position match player's smoothed X position
+        camera.position.x = playerCar.currentX;
+        // Make camera look at the player's X/Z plane
+        camera.lookAt(playerCar.currentX, 0, PLAYER_Z); 
+        // >> END ADDITION
+
         // 3. Motion Calculations
         const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
         const roadMoveDistance = playerSpeedUnits * deltaTime;
@@ -799,14 +878,58 @@
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
+            // Z-axis movement
             carMesh.position.z += trafficRelativeMoveDistance; 
             
+            // >> START ADDITION: NPC Lane Change AI
+            carMesh.userData.lastLaneChangeDecision += deltaTime;
+            
+            // A. Check if it's time to make a decision
+            if (carMesh.userData.lastLaneChangeDecision > carMesh.userData.timeToNextChange && !carMesh.userData.isChangingLanes) {
+                carMesh.userData.lastLaneChangeDecision = 0;
+                carMesh.userData.timeToNextChange = 3 + Math.random() * 5; // Reset timer
+
+                const currentLane = carMesh.userData.lane;
+                const direction = Math.random() > 0.5 ? 1 : -1;
+                let targetLane = currentLane + direction;
+
+                // If at edge, try the other direction
+                if (targetLane < 0 || targetLane >= LANE_COUNT) {
+                    targetLane = currentLane - direction;
+                }
+
+                // If still out of bounds (e.g., single lane road, though not in this game), do nothing
+                if (targetLane >= 0 && targetLane < LANE_COUNT && targetLane !== currentLane) {
+                    // B. Check if the target lane is safe
+                    if (isNPCSafeToChange(carMesh, targetLane)) {
+                        carMesh.userData.isChangingLanes = true;
+                        carMesh.userData.lane = targetLane;
+                        carMesh.userData.targetX = gameState.playerCar.lanePositions[targetLane];
+                    }
+                }
+            }
+
+            // C. Move the car if it's changing lanes
+            if (carMesh.userData.isChangingLanes) {
+                const moveSpeed = carMesh.userData.moveSpeed;
+                carMesh.position.x += (carMesh.userData.targetX - carMesh.position.x) * moveSpeed * deltaTime;
+
+                // Check if it has arrived
+                if (Math.abs(carMesh.userData.targetX - carMesh.position.x) < 0.05) {
+                    carMesh.position.x = carMesh.userData.targetX;
+                    carMesh.userData.isChangingLanes = false;
+                }
+            }
+            // >> END ADDITION
+            
+            // Collision Check (now checks against moving player AND moving NPCs)
             if (checkCollision(playerCar.mesh, carMesh)) {
                 gameState.isGameOver = true;
                 showGameOverScreen();
                 return;
             }
 
+            // Despawn Check
             if (carMesh.position.z > DESPAWN_Z) {
                 scene.remove(carMesh);
                 traffic.splice(i, 1);
@@ -911,11 +1034,13 @@
         const trafficCollisionDepth = trafficMesh.userData.collisionDepth || CAR_SIZE.depth; 
         const trafficHalfDepth = trafficCollisionDepth / 2; 
 
-        // 1. X-axis overlap check (simple check for same lane)
+        // 1. X-axis overlap check
+        // >> START MODIFICATION: Use the traffic's current X position for collision
         const playerMinX = player.position.x - halfWidth * 0.9; 
         const playerMaxX = player.position.x + halfWidth * 0.9;
-        const trafficMinX = trafficMesh.position.x - halfWidth * 0.9;
-        const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9;
+        const trafficMinX = trafficMesh.position.x - halfWidth * 0.9; // Use position.x, not lane
+        const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9; // Use position.x, not lane
+        // >> END MODIFICATION
 
         const xOverlap = Math.max(0, Math.min(playerMaxX, trafficMaxX) - Math.max(playerMinX, trafficMinX));
 
@@ -961,7 +1086,6 @@
 
     // --- GAME CONTROL FUNCTIONS ---
     
-    // >> START ADDITION: Keybinding Functions
     /** Global function to update keybindings from the settings menu. */
     window.updateKeybinding = function(action, elementId) {
         const button = document.getElementById(elementId);
@@ -1010,7 +1134,6 @@
 
         controlsInfoEl.innerHTML = `<p class="font-semibold">Controls: **Gas:** ${gasDisplay} (or Hold) | **Steer:** ${leftDisplay}/${rightDisplay}</p>`;
     }
-    // >> END ADDITION: Keybinding Functions
 
 
     /** Shows the main menu screen. */
@@ -1023,9 +1146,7 @@
         // Clear old scene items (if any are left from a crash/restart)
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
-            // >> START ADDITION: Include road details in cleanup
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
-            // >> END ADDITION
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
@@ -1084,7 +1205,6 @@
         `;
     }
 
-    // >> START ADDITION: Settings Menu Function
     /** Shows the settings menu modal for keybinding customization. */
     window.showSettingsMenu = function() {
         modalContainerEl.innerHTML = `
@@ -1122,7 +1242,6 @@
             </div>
         `;
     }
-    // >> END ADDITION: Settings Menu Function
 
 
     /** Toggles the game's paused state and shows the modal. */
@@ -1174,9 +1293,7 @@
         // Clear all scene dynamic items 
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
-            // >> START UPDATE: Cleanup now includes isRoadDetail
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
-            // >> END UPDATE
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
@@ -1209,6 +1326,11 @@
         gameState.playerCar.targetX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         scene.add(gameState.playerCar.mesh);
+        
+        // >> START ADDITION: Reset camera position to player start
+        camera.position.x = gameState.playerCar.currentX;
+        camera.lookAt(gameState.playerCar.currentX, 0, PLAYER_Z);
+        // >> END ADDITION
 
         // Rebuild static scene elements
         createRoad();
@@ -1223,9 +1345,7 @@
         modalContainerEl.innerHTML = '';
         pauseButtonEl.textContent = 'PAUSE (Space)';
         
-        // >> START ADDITION: Initialize controls info
         updateControlsInfo(); 
-        // >> END ADDITION
 
         // Reset pedal visuals
         gasPedalEl.classList.remove('active', 'bg-green-500');
@@ -1247,6 +1367,7 @@
         const deltaTime = clock.getDelta(); 
         
         // 1. Update all game physics and movement
+        // (This now includes camera movement and NPC AI)
         updateMotion(deltaTime);
         
         // 2. Update all UI displays and check for progression
@@ -1275,7 +1396,6 @@
 
         let newLane = gameState.playerCar.lane;
 
-        // >> START UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.left) {
             newLane = Math.max(0, gameState.playerCar.lane - 1);
         } else if (e.key === gameState.keyBindings.right) {
@@ -1285,7 +1405,6 @@
         } else if (e.key === 'ArrowDown') { // Always allow ArrowDown as a universal 'brake' key
             gameState.isGassing = false; 
         }
-        // >> END UPDATED KEYBINDINGS
         
         if (newLane !== gameState.playerCar.lane) {
             gameState.playerCar.lane = newLane;
@@ -1294,11 +1413,9 @@
     });
     
     document.addEventListener('keyup', (e) => {
-        // >> START UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.gas) {
             gameState.isGassing = false;
         }
-        // >> END UPDATED KEYBINDINGS
     });
 
     // --- INITIALIZATION ---
