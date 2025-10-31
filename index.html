@@ -903,7 +903,8 @@
         gameState.lastTrafficSpawn += deltaTime;
         const requiredTime = BASE_SPAWN_INTERVAL / Math.pow(TRAFFIC_MULTIPLIER, gameState.level - 1); 
 
-        if (gameState.lastTrafficSpawn > requiredTime) {
+        // Check if enough time has passed (The fix relies on gameState.lastTrafficSpawn being initialized negatively)
+        if (gameState.lastTrafficSpawn >= requiredTime) { 
             let newLane = Math.floor(Math.random() * LANE_COUNT);
             let attempts = 0;
             const maxAttempts = LANE_COUNT * 2; 
@@ -1276,7 +1277,8 @@
         gameState.isPaused = false;
         gameState.traffic = [];
         gameState.backgroundElements = [];
-        gameState.lastTrafficSpawn = 0;
+        // >> FIX: Initialize the traffic spawn timer with a negative value to force a 3.0 second delay
+        gameState.lastTrafficSpawn = -3.0;
         cleanupWeather(); 
 
         scaleGameSpeed(); 
