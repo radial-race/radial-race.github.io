@@ -75,10 +75,8 @@
             background: linear-gradient(135deg, #2d3748, #1a202c);
             border: 4px solid #4a5568;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
-            /* --- FIX: Added max height and overflow scroll for responsiveness --- */
             max-height: 90vh; 
             overflow-y: auto;
-            /* -------------------------------------------------------------------- */
         }
     </style>
 </head>
@@ -123,9 +121,7 @@
     const LANE_COUNT = 4;
     const ROAD_WIDTH = 6;
     const CAR_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.7, height: 0.5, depth: 1.5 };
-    // >> START ADDITION: TRUCK SIZE
     const TRUCK_SIZE = { width: (ROAD_WIDTH / LANE_COUNT) * 0.9, height: 1.0, depth: 3.0 }; // Wider and longer
-    // >> END ADDITION
     const SPEED_UNIT_TO_MPH = 5.33; 
     
     // Fixed road color (Classic Road as requested)
@@ -177,13 +173,12 @@
         backgroundElements: [],
         weatherParticles: null,
         currentEnvironmentIndex: 0,
-        // >> START ADDITION: Keybindings
+        // Keybindings
         keyBindings: {
             gas: 'ArrowUp',
             left: 'ArrowLeft',
             right: 'ArrowRight'
         },
-        // >> END ADDITION
         playerCar: {
             mesh: null,
             lane: 1, 
@@ -239,9 +234,7 @@
         // Main Body
         const mainBodyGeometry = new THREE.BoxGeometry(CAR_SIZE.width, CAR_SIZE.height, CAR_SIZE.depth);
         const mainBody = new THREE.Mesh(mainBodyGeometry, material);
-        // --- FIX 1: Raise the car body to sit on top of the wheels ---
         mainBody.position.y = CAR_SIZE.height / 2 + bodyOffset; 
-        // -------------------------------------------------------------
         carGroup.add(mainBody);
 
         // Cabin
@@ -252,9 +245,7 @@
         const cabinMaterial = new THREE.MeshStandardMaterial({ color: color - 0x111111, metalness: 0.3, roughness: 0.8 }); 
         
         const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-        // --- FIX 2: Raise the cabin by the same offset ---
         cabin.position.y = CAR_SIZE.height + cabinHeight / 2 + bodyOffset;
-        // -------------------------------------------------
         cabin.position.z = -CAR_SIZE.depth * 0.1;
         carGroup.add(cabin);
 
@@ -273,7 +264,6 @@
         wheelPositions.forEach(pos => {
             const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheel.rotation.z = Math.PI / 2;
-            // The position is correct: center at Y=radius means bottom touches Y=0
             wheel.position.set(pos.x, wheelRadius, pos.z);
             carGroup.add(wheel);
         });
@@ -300,9 +290,7 @@
         // Main Body (Box)
         const mainBodyGeometry = new THREE.BoxGeometry(TRUCK_SIZE.width, TRUCK_SIZE.height, TRUCK_SIZE.depth);
         const mainBody = new THREE.Mesh(mainBodyGeometry, material);
-        // --- FIX 3: Raise the truck body to sit on top of the wheels ---
         mainBody.position.y = TRUCK_SIZE.height / 2 + bodyOffset;
-        // -------------------------------------------------------------
         carGroup.add(mainBody);
 
         // Cabin (Smaller box on the front)
@@ -313,9 +301,7 @@
         const cabinMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.3, roughness: 0.8 }); 
         
         const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-        // --- FIX 4: Raise the truck cabin by the same offset ---
         cabin.position.y = TRUCK_SIZE.height + cabinHeight / 2 + bodyOffset; 
-        // ------------------------------------------------------
         cabin.position.z = TRUCK_SIZE.depth * 0.3; // Position at the front
         carGroup.add(cabin);
         
@@ -335,7 +321,6 @@
         wheelPositions.forEach(pos => {
             const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
             wheel.rotation.z = Math.PI / 2;
-            // The position is correct: center at Y=radius means bottom touches Y=0
             wheel.position.set(pos.x, wheelRadius, pos.z);
             carGroup.add(wheel);
         });
@@ -586,7 +571,7 @@
             scene.add(lineGroup);
         }
 
-        // >> START ADDITION: Road Railings (Guardrails)
+        // Road Railings (Guardrails)
         const railingGeometry = new THREE.BoxGeometry(0.15, 0.4, ROAD_DEPTH); 
         const railingMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.3 }); 
 
@@ -605,7 +590,6 @@
         rightRailing.castShadow = true;
         rightRailing.userData.isRoadDetail = true;
         scene.add(rightRailing);
-        // >> END ADDITION
     }
 
     // --- GAME LOGIC FUNCTIONS ---
@@ -705,18 +689,17 @@
         // Check which size we used to adjust the spawn position correctly
         const carDepth = carMesh.userData.collisionDepth;
         
+        // Set ALL required userData properties immediately
+        carMesh.userData.lane = lane; 
+        carMesh.userData.targetLane = lane;
+        carMesh.userData.moveSpeed = 8; // Speed for traffic lane change
+        carMesh.userData.lastShiftTime = clock.getElapsedTime();
+
         carMesh.position.set(
             gameState.playerCar.lanePositions[lane], 
             0, 
             FAR_Z_SPAWN + carDepth / 2 + Math.random() * 20 
         );
-
-        carMesh.userData.lane = lane; // Re-assign userData after createCarMesh returns
-        // >> START ADDITION: Traffic Behavior State
-        carMesh.userData.targetLane = lane;
-        carMesh.userData.moveSpeed = 8; // Speed for traffic lane change
-        carMesh.userData.lastShiftTime = clock.getElapsedTime();
-        // >> END ADDITION
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
@@ -797,6 +780,14 @@
         carMesh.position.z += trafficRelativeMoveDistance; 
 
         // 2. Lateral Movement (Smoothly move towards the target X position)
+        // ** FIX 1: Defensive check for out-of-bounds lane index **
+        if (carMesh.userData.targetLane < 0 || carMesh.userData.targetLane >= LANE_COUNT) {
+            // If the lane index is invalid, reset to current lane and skip further logic
+            carMesh.userData.targetLane = carMesh.userData.lane; 
+            console.error('Invalid target lane detected, resetting.');
+            return checkCollision(gameState.playerCar.mesh, carMesh);
+        }
+        
         const targetX = lanePositions[carMesh.userData.targetLane];
 
         carMesh.position.x += (targetX - carMesh.position.x) * carMesh.userData.moveSpeed * deltaTime;
@@ -885,13 +876,11 @@
         for (let i = traffic.length - 1; i >= 0; i--) {
             const carMesh = traffic[i];
             
-            // >> START UPDATE: Use the dedicated function for movement, behavior, and collision
             if (updateTrafficCar(carMesh, deltaTime)) {
                 gameState.isGameOver = true;
                 showGameOverScreen();
                 return;
             }
-            // >> END UPDATE
 
             if (carMesh.position.z > DESPAWN_Z) {
                 scene.remove(carMesh);
@@ -903,7 +892,7 @@
         gameState.lastTrafficSpawn += deltaTime;
         const requiredTime = BASE_SPAWN_INTERVAL / Math.pow(TRAFFIC_MULTIPLIER, gameState.level - 1); 
 
-        // Check if enough time has passed (The fix relies on gameState.lastTrafficSpawn being initialized negatively)
+        // Check if enough time has passed
         if (gameState.lastTrafficSpawn >= requiredTime) { 
             let newLane = Math.floor(Math.random() * LANE_COUNT);
             let attempts = 0;
@@ -1048,7 +1037,6 @@
 
     // --- GAME CONTROL FUNCTIONS ---
     
-    // >> START ADDITION: Keybinding Functions
     /** Global function to update keybindings from the settings menu. */
     window.updateKeybinding = function(action, elementId) {
         const button = document.getElementById(elementId);
@@ -1097,7 +1085,6 @@
 
         controlsInfoEl.innerHTML = `<p class="font-semibold">Controls: **Gas:** ${gasDisplay} (or Hold) | **Steer:** ${leftDisplay}/${rightDisplay}</p>`;
     }
-    // >> END ADDITION: Keybinding Functions
 
 
     /** Shows the main menu screen. */
@@ -1110,9 +1097,7 @@
         // Clear old scene items (if any are left from a crash/restart)
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
-            // >> START ADDITION: Include road details in cleanup
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
-            // >> END ADDITION
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
@@ -1171,7 +1156,6 @@
         `;
     }
 
-    // >> START ADDITION: Settings Menu Function
     /** Shows the settings menu modal for keybinding customization. */
     window.showSettingsMenu = function() {
         modalContainerEl.innerHTML = `
@@ -1209,7 +1193,6 @@
             </div>
         `;
     }
-    // >> END ADDITION: Settings Menu Function
 
 
     /** Toggles the game's paused state and shows the modal. */
@@ -1261,9 +1244,7 @@
         // Clear all scene dynamic items 
         for (let i = scene.children.length - 1; i >= 0; i--) {
             const child = scene.children[i];
-            // >> START UPDATE: Cleanup now includes isRoadDetail
             if (child.userData.isCar || child.userData.isLaneLine || child.userData.isRoad || child.userData.isBackgroundElement || child.userData.isWeather || child.userData.isRoadDetail) {
-            // >> END UPDATE
                 scene.remove(child);
                 child.geometry?.dispose();
                 child.material?.dispose();
@@ -1277,8 +1258,8 @@
         gameState.isPaused = false;
         gameState.traffic = [];
         gameState.backgroundElements = [];
-        // >> FIX: Initialize the traffic spawn timer with a negative value to force a 3.0 second delay
-        gameState.lastTrafficSpawn = -3.0;
+        // FIX: Initialize the traffic spawn timer with a negative value to force a 3.0 second delay
+        gameState.lastTrafficSpawn = -3.0; 
         cleanupWeather(); 
 
         scaleGameSpeed(); 
@@ -1310,9 +1291,8 @@
         modalContainerEl.innerHTML = '';
         pauseButtonEl.textContent = 'PAUSE (Space)';
         
-        // >> START ADDITION: Initialize controls info
+        // Initialize controls info
         updateControlsInfo(); 
-        // >> END ADDITION
 
         // Reset pedal visuals
         gasPedalEl.classList.remove('active', 'bg-green-500');
@@ -1362,7 +1342,7 @@
 
         let newLane = gameState.playerCar.lane;
 
-        // >> START UPDATED KEYBINDINGS (with e.preventDefault() for better control)
+        // UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.left) {
             newLane = Math.max(0, gameState.playerCar.lane - 1);
             e.preventDefault();
@@ -1376,7 +1356,6 @@
             gameState.isGassing = false; 
             e.preventDefault();
         }
-        // >> END UPDATED KEYBINDINGS
         
         if (newLane !== gameState.playerCar.lane) {
             gameState.playerCar.lane = newLane;
@@ -1385,11 +1364,9 @@
     });
     
     document.addEventListener('keyup', (e) => {
-        // >> START UPDATED KEYBINDINGS
         if (e.key === gameState.keyBindings.gas) {
             gameState.isGassing = false;
         }
-        // >> END UPDATED KEYBINDINGS
     });
 
     // --- INITIALIZATION ---
