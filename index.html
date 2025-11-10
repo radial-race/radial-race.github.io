@@ -133,8 +133,8 @@
     const CLASSIC_ROAD_COLOR = 0x222222; 
     
     // Physics and Speed constants (ADJUSTED FOR FASTER FEEL AND MORE BUFFER)
-    // NOTE: These are the BASE values. They will be modified by upgrades via applyUpgrades().
     const BASE_MAX_PLAYER_SPEED = 25.0; 
+    // FIX: Changed BASE_IDLE_PLAYER_SPEED from 10.0 to 0.0 to enable full braking to a stop.
     const BASE_IDLE_PLAYER_SPEED = 0.0;  
     const BASE_TRAFFIC_SPEED = 6.0;    
     const BASE_ACCELERATION_RATE = 7.0; 
@@ -152,15 +152,15 @@
     const BASE_SPAWN_INTERVAL = 0.55; 
     const TRAFFIC_MULTIPLIER = 1.20; 
     
-    // Collision gaps
+    // **ADJUSTED:** Minimum required Z-gap for the longitudinal buffer (3.5 car lengths)
     const MIN_LONGITUDINAL_GAP = CAR_SIZE.depth * 3.5; 
+    // **ADJUSTED:** Minimum required Z-gap for the lateral buffer (1.2 car lengths)
     const MIN_LATERAL_GAP = CAR_SIZE.depth * 1.2; 
-    const NPC_MIN_Z_CHANGE_GAP = MIN_LONGITUDINAL_GAP * 1.2; 
     
-    // --- UPGRADE CONSTANTS (NEW) ---
-    const UPGRADE_KEY = 'radialRaceV3Upgrades';
-    const BASE_UPGRADE_COST = 5000;
-
+    // >> START ADDITION: NPC Lane Change Constants
+    // Minimum Z gap for an NPC to change lanes (relative to other NPCs or player)
+    const NPC_MIN_Z_CHANGE_GAP = MIN_LONGITUDINAL_GAP * 1.2; 
+    // >> END ADDITION
 
     // --- ENVIRONMENT PRESETS ---
     const ENVIRONMENTS = [
@@ -197,28 +197,11 @@
             currentX: 0,
             moveSpeed: 12 
         },
-        // --- NEW UPGRADES STATE ---
-        upgrades: {
-            maxSpeed: { 
-                name: 'Max Speed Boost',
-                description: 'Increases your top speed by 10%.',
-                level: 0, 
-                cost: BASE_UPGRADE_COST, 
-                stat: 'BASE_MAX_PLAYER_SPEED',
-                multiplier: 1.10, // 10% increase per level
-            },
-            acceleration: { 
-                name: 'Acceleration Increase',
-                description: 'Increases your acceleration rate by 15%.',
-                level: 0, 
-                cost: BASE_UPGRADE_COST, 
-                stat: 'BASE_ACCELERATION_RATE',
-                multiplier: 1.15, // 15% increase per level
-            },
-        }
+        // ADDITION: Store traffic grouped by lane for faster lookups (performance upgrade)
+        trafficByLane: [] 
     };
     
-    // Dynamic Speed Variables - These are the variables affected by both UPGRADES and LEVEL
+    // Dynamic Speed Variables
     let MAX_PLAYER_SPEED = BASE_MAX_PLAYER_SPEED;
     let IDLE_PLAYER_SPEED = BASE_IDLE_PLAYER_SPEED;
     let TRAFFIC_SPEED = BASE_TRAFFIC_SPEED;
@@ -251,9 +234,7 @@
         gameState.playerCar.lanePositions = lanePositions;
     }
     
-    /** * Creates a Bugatti Veyron-like player car mesh.
-     * FIX: Added a Rear Spoiler to resolve the user's "spoiler on the front" issue.
-     */
+    /** Creates a Bugatti Veyron-like player car mesh. */
     function createVeyronMesh(color) {
         const carGroup = new THREE.Group();
         const primaryColor = color;
@@ -301,28 +282,17 @@
         windowMesh.position.y += cabinHeight * 0.05; 
         carGroup.add(windowMesh);
 
-        // 4. Front Grille (Horseshoe Approximation - Smaller and tucked in)
+        // 4. Front Grille (Horseshoe Approximation)
         const grilleWidth = width * 0.25;
-        const grilleHeight = height * 0.4; // Slightly smaller height
+        const grilleHeight = height * 0.5;
         const grilleDepth = 0.1;
         const grilleGeometry = new THREE.BoxGeometry(grilleWidth, grilleHeight, grilleDepth);
         const grille = new THREE.Mesh(grilleGeometry, secondaryMaterial);
-        grille.position.y = grilleHeight / 2 + 0.05; // Tucked slightly lower
-        grille.position.z = depth / 2; // Positioned on the front face, not sticking out
+        grille.position.y = grilleHeight / 2 + 0.1;
+        grille.position.z = depth / 2 + grilleDepth / 2;
         carGroup.add(grille);
 
-        // --- FIX: 5. Rear Spoiler (New Addition to resolve user issue) ---
-        const spoilerWidth = width * 0.8;
-        const spoilerHeight = 0.15;
-        const spoilerDepth = 0.05;
-        const spoilerGeometry = new THREE.BoxGeometry(spoilerWidth, spoilerHeight, spoilerDepth);
-        const spoiler = new THREE.Mesh(spoilerGeometry, primaryMaterial);
-        spoiler.position.y = height * 1.1; // Positioned high above the trunk
-        spoiler.position.z = -depth / 2 + spoilerDepth / 2;    // At the very rear
-        carGroup.add(spoiler);
-        // -----------------------------------------------------------------
-
-        // 6. Headlights (small yellow boxes on the front edges)
+        // 5. Headlights (small yellow boxes on the front edges)
         const headlightSize = 0.05;
         const headlightGeometry = new THREE.BoxGeometry(headlightSize, headlightSize, headlightSize);
         
@@ -335,6 +305,19 @@
         const headlightR = new THREE.Mesh(headlightGeometry, headlightMaterial);
         headlightR.position.set(-width * 0.45, height * 0.7, depth / 2 + 0.01);
         carGroup.add(headlightR);
+        
+        // --- UPGRADE: ADDED REAR SPOILER ---
+        // 6. Rear Spoiler (Small, raised bar at the back)
+        const spoilerWidth = width * 0.8;
+        const spoilerHeight = 0.05;
+        const spoilerDepth = 0.4; // Extends backward
+        const spoilerGeometry = new THREE.BoxGeometry(spoilerWidth, spoilerHeight, spoilerDepth);
+        const spoiler = new THREE.Mesh(spoilerGeometry, secondaryMaterial); // Use secondary material for metallic look
+        // Positioned on top of the main body, at the very back edge (negative Z)
+        spoiler.position.y = height + spoilerHeight / 2 + 0.1;
+        spoiler.position.z = -depth / 2 + spoilerDepth / 2; // Positioned correctly at the rear
+        carGroup.add(spoiler);
+        // -----------------------------------
 
         // 7. Wheels 
         const wheelRadius = CAR_SIZE.width * 0.075; 
@@ -493,7 +476,7 @@
     /** Creates a car mesh (randomly selects between types for traffic, or always generic for player). */
     function createCarMesh(color, isPlayer = false) {
         if (isPlayer) {
-            // Use the Veyron mesh for the player
+            // --- MODIFIED: Use the new Veyron mesh for the player ---
             return createVeyronMesh(0x00008B); // Deep Blue
         }
 
@@ -638,11 +621,12 @@
         const initialEnv = ENVIRONMENTS[0];
         scene.fog = new THREE.Fog(initialEnv.skyColor, ROAD_DEPTH * initialEnv.fogNear, ROAD_DEPTH * initialEnv.fogFar);
         
-        // Use PerspectiveCamera again
+        // >> START MODIFICATION: Revert to Perspective Camera for Chase View
         const initialWidth = window.innerWidth;
         const initialHeight = window.innerHeight;
         const aspect = initialWidth / initialHeight;
         
+        // Use PerspectiveCamera again
         camera = new THREE.PerspectiveCamera(
             75,         // fov (Field of View)
             aspect,     // aspect ratio
@@ -651,8 +635,14 @@
         );
 
         // Position it "barely over" and slightly behind the car
+        // Player is at PLAYER_Z (which is 10)
+        // So we set camera Y=4 (low), Z=15 (5 units behind the player)
         camera.position.set(0, 4, PLAYER_Z + 5); 
+        
+        // Look *forward* from the car's position, slightly down
+        // We look at Y=2, and 10 units *in front* of the player (Z=0)
         camera.lookAt(0, 2, PLAYER_Z - 10); 
+        // >> END MODIFICATION
 
         // Renderer setup
         renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -674,6 +664,7 @@
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
         
+        // >> START MODIFICATION: Improve shadow quality (Kept from previous version)
         directionalLight.shadow.mapSize.width = 2048; 
         directionalLight.shadow.mapSize.height = 2048;
         directionalLight.shadow.camera.left = -ROAD_WIDTH * 1.5; 
@@ -682,6 +673,7 @@
         directionalLight.shadow.camera.bottom = -20;
         directionalLight.shadow.camera.near = 1;
         directionalLight.shadow.camera.far = 40; 
+        // >> END MODIFICATION
         
         scene.add(directionalLight);
     }
@@ -692,7 +684,10 @@
         const newWidth = window.innerWidth;
         const newHeight = window.innerHeight;
 
+        // >> START MODIFICATION: Update Perspective Camera properties
         camera.aspect = newWidth / newHeight;
+        // >> END MODIFICATION
+
         camera.updateProjectionMatrix();
         renderer.setSize(newWidth, newHeight);
     }
@@ -758,115 +753,16 @@
         scene.add(rightRailing);
     }
 
-    // --- GAME UPGRADE AND PERSISTENCE LOGIC (NEW) ---
-
-    /** Saves current upgrade levels and costs to localStorage. */
-    function saveUpgrades() {
-        try {
-            const upgradeData = {};
-            for (const key in gameState.upgrades) {
-                upgradeData[key] = {
-                    level: gameState.upgrades[key].level,
-                    cost: gameState.upgrades[key].cost
-                };
-            }
-            localStorage.setItem(UPGRADE_KEY, JSON.stringify(upgradeData));
-        } catch (e) {
-            console.error("Could not save upgrades to localStorage:", e);
-        }
-    }
-
-    /** Loads upgrade levels and costs from localStorage. */
-    function loadUpgrades() {
-        try {
-            const upgradeData = localStorage.getItem(UPGRADE_KEY);
-            if (upgradeData) {
-                const savedUpgrades = JSON.parse(upgradeData);
-                // Merge saved data with defaults to ensure new upgrades are included
-                for (const key in gameState.upgrades) {
-                    if (savedUpgrades[key]) {
-                        gameState.upgrades[key].level = savedUpgrades[key].level;
-                        gameState.upgrades[key].cost = savedUpgrades[key].cost;
-                    }
-                }
-            }
-            applyUpgrades();
-        } catch (e) {
-            console.error("Could not load upgrades from localStorage:", e);
-        }
-    }
-
-    /** Applies all purchased upgrades to the base game stats. */
-    function applyUpgrades() {
-        // 1. Reset dynamic base stats to true constants
-        MAX_PLAYER_SPEED = BASE_MAX_PLAYER_SPEED;
-        ACCELERATION_RATE = BASE_ACCELERATION_RATE;
-
-        // 2. Apply upgrades
-        for (const key in gameState.upgrades) {
-            const upgrade = gameState.upgrades[key];
-            
-            // Only apply if level > 0
-            if (upgrade.level > 0) {
-                const multiplier = Math.pow(upgrade.multiplier, upgrade.level);
-                
-                if (key === 'maxSpeed') {
-                    MAX_PLAYER_SPEED *= multiplier;
-                } else if (key === 'acceleration') {
-                    ACCELERATION_RATE *= multiplier;
-                }
-            }
-        }
-        
-        // 3. Re-apply level scaling based on new upgraded base stats
-        scaleGameSpeed(); 
-    }
-
-    /** Logic for purchasing an upgrade (unlimited, 1.5x price increase). */
-    window.buyUpgrade = function(upgradeKey) {
-        const upgrade = gameState.upgrades[upgradeKey];
-        const currentScore = Math.floor(gameState.score);
-
-        if (currentScore < upgrade.cost) {
-            alert(`You need ${Math.ceil(upgrade.cost - currentScore)} more Score to purchase this upgrade!`);
-            return;
-        }
-
-        // 1. Deduct cost
-        gameState.score -= upgrade.cost;
-        
-        // 2. Level up
-        upgrade.level += 1;
-        
-        // 3. Apply rising price (1.5x)
-        upgrade.cost *= 1.5;
-        
-        // 4. Apply new stat value (updates MAX_PLAYER_SPEED/ACCELERATION_RATE)
-        applyUpgrades();
-        
-        // 5. Save and refresh
-        saveUpgrades();
-        updateUI(0); // Update the score display immediately
-        showUpgradesMenu(); // Refresh the menu to show new stats/price/level
-    }
-
     // --- GAME LOGIC FUNCTIONS ---
 
     /** Applies the speed and traffic multipliers based on the current level. */
     function scaleGameSpeed() {
-        // NOTE: MAX_PLAYER_SPEED and ACCELERATION_RATE already contain the base UPGRADE multiplier.
-        // This function adds the level-based difficulty multiplier on top of the upgrade.
         const speedFactor = Math.pow(LEVEL_MULTIPLIER, gameState.level - 1); 
 
-        // Apply level scaling
-        const scaledMaxSpeed = MAX_PLAYER_SPEED * speedFactor;
-        const scaledAcceleration = ACCELERATION_RATE * speedFactor;
-
-        // Update dynamic game stats
-        MAX_PLAYER_SPEED = scaledMaxSpeed; // Re-use this variable for the final top speed
-        IDLE_PLAYER_SPEED = BASE_IDLE_PLAYER_SPEED; // This remains 0.0
+        MAX_PLAYER_SPEED = BASE_MAX_PLAYER_SPEED * speedFactor;
+        IDLE_PLAYER_SPEED = BASE_IDLE_PLAYER_SPEED * speedFactor; // Now 0.0
         TRAFFIC_SPEED = BASE_TRAFFIC_SPEED * speedFactor;
-        ACCELERATION_RATE = scaledAcceleration;
+        ACCELERATION_RATE = BASE_ACCELERATION_RATE * speedFactor;
         DECELERATION_RATE = BASE_DECELERATION_RATE * speedFactor;
         
         // This line now clamps minimum speed to 0.0, correctly implementing the full stop feature
@@ -963,36 +859,48 @@
 
         carMesh.userData.lane = lane; 
         
+        // >> START ADDITION: Add state for lane changing AI (Kept from previous)
         carMesh.userData.isChangingLanes = false;
         carMesh.userData.targetX = carMesh.position.x;
+        // Time before next decision
         carMesh.userData.lastLaneChangeDecision = 0; 
+        // Decide to change lanes every 3-8 seconds
         carMesh.userData.timeToNextChange = 3 + Math.random() * 5; 
+        // Slower move speed than player
         carMesh.userData.moveSpeed = 4 + Math.random() * 4; 
+        // >> END ADDITION
         
         scene.add(carMesh);
         gameState.traffic.push(carMesh);
     }
     
-    /** * Checks if spawning a car in a given lane adheres to the minimum separation rules. */
+    /** * Checks if spawning a car in a given lane adheres to the minimum separation rules.
+     * Crucially checks for overlapping cars at the far spawn point.
+     * @param {number} laneToSpawn - The lane index we are considering placing a new car.
+     * @returns {boolean} True if it is safe to spawn, false otherwise.
+     */
     function isSpawnSafe(laneToSpawn) {
         const currentLane = laneToSpawn;
         const spawnZ = FAR_Z_SPAWN; 
         
         // Find existing traffic that is close to the spawn point
         const relevantTraffic = gameState.traffic.filter(car => 
-            car.position.z < PLAYER_Z + 10 
+            car.position.z < PLAYER_Z + 10 // Only consider cars that haven't passed the player yet
         );
         
         for (const car of relevantTraffic) {
             const carZ = car.position.z;
+            // Get the car's collision depth dynamically
             const carDepth = car.userData.collisionDepth || CAR_SIZE.depth;
             
             // 1. Same-Lane Check (Longitudinal Separation)
             if (car.userData.lane === currentLane) {
+                // Check for immediate overlap (car spawning *inside* existing car)
                 if (Math.abs(carZ - spawnZ) < carDepth * 0.5) {
                     return false; 
                 }
                 
+                // Check if the car is too close to the front of the spawn point
                 if (carZ - spawnZ < MIN_LONGITUDINAL_GAP && carZ - spawnZ > 0) {
                     return false; 
                 }
@@ -1002,21 +910,24 @@
             const isAdjacent = Math.abs(car.userData.lane - currentLane) === 1;
 
             if (isAdjacent) {
+                // Check if the adjacent car is too close longitudinally
                 if (Math.abs(carZ - spawnZ) < MIN_LATERAL_GAP) {
                     return false;
                 }
             }
         }
         
-        // 3. Playability Check: Ensure a path remains
+        // 3. Playability Check: Ensure a path remains (Don't spawn if all other lanes are blocked near Z=FAR_Z_SPAWN)
         const blockedLanes = new Set(); 
         
         for (const car of relevantTraffic) {
+            // A lane is blocked if a car is within the generous longitudinal gap distance
             if (Math.abs(car.position.z - spawnZ) < MIN_LONGITUDINAL_GAP * 0.75) { 
                 blockedLanes.add(car.userData.lane);
             }
         }
         
+        // If all lanes are blocked, it's impossible to pass through the spawn zone.
         if (blockedLanes.size === LANE_COUNT) {
             return false;
         }
@@ -1024,48 +935,67 @@
         return true; 
     }
     
-    /** Checks if it's safe for an NPC car to move into a target lane. */
+    // >> START MODIFICATION: NPC Lane Change Safety Check using the new trafficByLane map
+    /**
+     * Checks if it's safe for an NPC car to move into a target lane.
+     * Uses the pre-calculated gameState.trafficByLane map for an O(N) performance upgrade.
+     * @param {THREE.Mesh} car - The NPC car that wants to change lanes.
+     * @param {number} targetLane - The lane index the car wants to move to.
+     * @returns {boolean} True if the lane change is safe, false otherwise.
+     */
     function isNPCSafeToChange(car, targetLane) {
         const carZ = car.position.z;
         
-        // 1. Check against other traffic
-        for (const otherCar of gameState.traffic) {
-            if (otherCar === car) continue; 
+        // 1. Check against other traffic in the target lane (Performance Upgrade Applied)
+        // Only iterate over cars that are actually in the target lane.
+        const targetLaneTraffic = gameState.trafficByLane[targetLane] || []; 
+        
+        for (const otherCar of targetLaneTraffic) {
+            if (otherCar === car) continue; // Don't check against self
 
-            // Check cars in the target lane
-            if (otherCar.userData.lane === targetLane) {
-                const zDiff = Math.abs(otherCar.position.z - carZ);
-                if (zDiff < NPC_MIN_Z_CHANGE_GAP) {
-                    return false;
-                }
+            const zDiff = Math.abs(otherCar.position.z - carZ);
+            // If longitudinally too close, it's not safe
+            if (zDiff < NPC_MIN_Z_CHANGE_GAP) {
+                return false;
             }
         }
 
         // 2. Check against the player
         if (targetLane === gameState.playerCar.lane) {
             const zDiff = Math.abs(PLAYER_Z - carZ);
+            // If longitudinally too close to the player, it's not safe
             if (zDiff < NPC_MIN_Z_CHANGE_GAP) {
                 return false;
             }
         }
         
-        return true; 
+        return true; // No conflicts found
     }
+    // >> END MODIFICATION
+
 
     /** Moves and wraps all dynamic elements to create the infinite road effect. */
     function updateMotion(deltaTime) {
         const playerCar = gameState.playerCar;
         const { playerSpeedUnits, traffic } = gameState;
 
+        // --- PERFORMANCE UPGRADE STEP 1: Group traffic by lane for O(1) lane-check lookup ---
+        // This array creation is an O(N) operation done once per frame, enabling O(N_target_lane) lookups later.
+        const trafficByLane = Array.from({ length: LANE_COUNT }, () => []);
+        for (const carMesh of traffic) {
+            trafficByLane[carMesh.userData.lane].push(carMesh);
+        }
+        gameState.trafficByLane = trafficByLane;
+        // ----------------------------------------------------------------------------------
+
         // 1. Update Player Car Speed
         if (gameState.isGassing) {
-            // MAX_PLAYER_SPEED is now dynamically scaled by both upgrades and level
             gameState.playerSpeedUnits = Math.min(MAX_PLAYER_SPEED, playerSpeedUnits + ACCELERATION_RATE * deltaTime);
             gasPedalEl.classList.add('active', 'bg-green-500');
             brakePedalEl.classList.remove('active', 'bg-red-500');
             
         } else {
-            // Because IDLE_PLAYER_SPEED is 0.0, this brakes the car to a full stop.
+            // Because IDLE_PLAYER_SPEED is now 0.0, this brakes the car to a full stop.
             if (playerSpeedUnits > IDLE_PLAYER_SPEED) {
                 gameState.playerSpeedUnits = Math.max(IDLE_PLAYER_SPEED, playerSpeedUnits - DECELERATION_RATE * deltaTime);
             }
@@ -1077,14 +1007,20 @@
         playerCar.currentX += (playerCar.targetX - playerCar.currentX) * playerCar.moveSpeed * deltaTime;
         playerCar.mesh.position.x = playerCar.currentX;
 
-        // Camera Follow Logic (Chase Cam)
+        // >> START MODIFICATION: Camera Follow Logic (Chase Cam)
+        // Camera X position matches player's smoothed X position
         camera.position.x = playerCar.currentX;
+        
+        // The camera needs to look *at* a point in front of the car,
+        // while also matching the car's X position.
+        // We create a "lookAt" target vector.
         const lookAtTarget = new THREE.Vector3(
-            playerCar.currentX, 
-            2,                  
-            PLAYER_Z - 10       
+            playerCar.currentX, // Match car's X
+            2,                  // Look slightly down (Y=2)
+            PLAYER_Z - 10       // Look 10 units in front of the player
         );
         camera.lookAt(lookAtTarget);
+        // >> END MODIFICATION
 
         // 3. Motion Calculations
         const trafficRelativeMoveDistance = (playerSpeedUnits - TRAFFIC_SPEED) * deltaTime;
@@ -1097,22 +1033,26 @@
             // Z-axis movement
             carMesh.position.z += trafficRelativeMoveDistance; 
             
-            // NPC Lane Change AI
+            // >> START ADDITION: NPC Lane Change AI (Kept from previous)
             carMesh.userData.lastLaneChangeDecision += deltaTime;
             
+            // A. Check if it's time to make a decision
             if (carMesh.userData.lastLaneChangeDecision > carMesh.userData.timeToNextChange && !carMesh.userData.isChangingLanes) {
                 carMesh.userData.lastLaneChangeDecision = 0;
-                carMesh.userData.timeToNextChange = 3 + Math.random() * 5; 
+                carMesh.userData.timeToNextChange = 3 + Math.random() * 5; // Reset timer
 
                 const currentLane = carMesh.userData.lane;
                 const direction = Math.random() > 0.5 ? 1 : -1;
                 let targetLane = currentLane + direction;
 
+                // If at edge, try the other direction
                 if (targetLane < 0 || targetLane >= LANE_COUNT) {
                     targetLane = currentLane - direction;
                 }
 
+                // If still out of bounds (e.g., single lane road, though not in this game), do nothing
                 if (targetLane >= 0 && targetLane < LANE_COUNT && targetLane !== currentLane) {
+                    // C. Check if the target lane is safe (Uses the optimized check)
                     if (isNPCSafeToChange(carMesh, targetLane)) {
                         carMesh.userData.isChangingLanes = true;
                         carMesh.userData.lane = targetLane;
@@ -1121,17 +1061,20 @@
                 }
             }
 
+            // C. Move the car if it's changing lanes
             if (carMesh.userData.isChangingLanes) {
                 const moveSpeed = carMesh.userData.moveSpeed;
                 carMesh.position.x += (carMesh.userData.targetX - carMesh.position.x) * moveSpeed * deltaTime;
 
+                // Check if it has arrived
                 if (Math.abs(carMesh.userData.targetX - carMesh.position.x) < 0.05) {
                     carMesh.position.x = carMesh.userData.targetX;
                     carMesh.userData.isChangingLanes = false;
                 }
             }
+            // >> END ADDITION
             
-            // Collision Check
+            // Collision Check (now checks against moving player AND moving NPCs)
             if (checkCollision(playerCar.mesh, carMesh)) {
                 gameState.isGameOver = true;
                 showGameOverScreen();
@@ -1154,11 +1097,13 @@
             let attempts = 0;
             const maxAttempts = LANE_COUNT * 2; 
 
+            // Loop to find a safe lane to spawn in
             while (!isSpawnSafe(newLane) && attempts < maxAttempts) {
-                newLane = (newLane + 1) % LANE_COUNT; 
+                newLane = (newLane + 1) % LANE_COUNT; // Cycle to the next lane
                 attempts++;
             }
 
+            // Only spawn if a safe lane was found within attempts
             if (isSpawnSafe(newLane)) {
                 createTrafficCar(newLane);
             }
@@ -1212,13 +1157,16 @@
             positions[i + 2] += particleSpeed;
             positions[i + 1] += yOffset; 
             
+            // Add slight horizontal drift for effect
             positions[i] += Math.sin(positions[i + 2] * 0.1 + clock.getElapsedTime() * 0.5) * 0.05 * deltaTime * 60;
 
+            // Wrap Z position
             if (positions[i + 2] > PLAYER_Z + 5) {
                 positions[i + 2] -= zWrap;
                 positions[i + 1] = 15 + Math.random() * 10;
             }
             
+            // Wrap Y position
             if (positions[i + 1] < 0) {
                 positions[i + 1] = 15 + Math.random() * 10;
             }
@@ -1234,14 +1182,17 @@
         const halfWidth = CAR_SIZE.width / 2;
         const halfDepth = CAR_SIZE.depth / 2;
         
+        // Use the car's dynamic collision depth (set in createCarMesh/createTruckMesh)
         const trafficCollisionDepth = trafficMesh.userData.collisionDepth || CAR_SIZE.depth; 
         const trafficHalfDepth = trafficCollisionDepth / 2; 
 
         // 1. X-axis overlap check
+        // >> START MODIFICATION: Use the traffic's current X position for collision (Kept)
         const playerMinX = player.position.x - halfWidth * 0.9; 
         const playerMaxX = player.position.x + halfWidth * 0.9;
-        const trafficMinX = trafficMesh.position.x - halfWidth * 0.9; 
-        const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9; 
+        const trafficMinX = trafficMesh.position.x - halfWidth * 0.9; // Use position.x, not lane
+        const trafficMaxX = trafficMesh.position.x + halfWidth * 0.9; // Use position.x, not lane
+        // >> END MODIFICATION
 
         const xOverlap = Math.max(0, Math.min(playerMaxX, trafficMaxX) - Math.max(playerMinX, trafficMinX));
 
@@ -1250,9 +1201,11 @@
             const playerFrontZ = playerZ + halfDepth;
             const playerBackZ = playerZ - halfDepth;
             
+            // Use trafficHalfDepth for traffic car
             const trafficFrontZ = trafficZ + trafficHalfDepth;
             const trafficBackZ = trafficZ - trafficHalfDepth;
 
+            // Use a slight tolerance to ensure the collision is forgiving but solid
             if (playerFrontZ > trafficBackZ + 0.1 && playerBackZ < trafficFrontZ - 0.1) {
                 return true;
             }
@@ -1274,7 +1227,7 @@
         speedValueEl.textContent = Math.floor(playerSpeedUnits * SPEED_UNIT_TO_MPH);
 
         // Level check
-        const newLevel = Math.floor(score / 3500) + 1; 
+        const newLevel = Math.floor(score / 3500) + 1; // Slightly increased score needed for next level
         if (newLevel > level) {
             gameState.level = newLevel;
             levelEl.textContent = gameState.level;
@@ -1295,11 +1248,11 @@
         const handler = (e) => {
             const newKey = e.key;
             
-            // Check for duplicate keys 
+            // Check for duplicate keys (prevent same key for different actions)
             for (const key in gameState.keyBindings) {
                 if (key !== action && gameState.keyBindings[key] === newKey) {
                     alert(`Key '${newKey}' is already used for ${key.toUpperCase()}.`);
-                    button.textContent = originalText; 
+                    button.textContent = originalText; // Revert to current key
                     document.removeEventListener('keydown', handler);
                     return;
                 }
@@ -1308,13 +1261,16 @@
             gameState.keyBindings[action] = newKey;
             button.textContent = newKey;
 
+            // Update controls info immediately if visible
             updateControlsInfo(); 
             
             document.removeEventListener('keydown', handler);
         };
 
+        // Temporarily remove focus from the button to ensure keydown is captured on the document
         button.blur(); 
         
+        // Remove old listener if any and add new one
         document.removeEventListener('keydown', handler);
         document.addEventListener('keydown', handler, { once: true });
     };
@@ -1360,9 +1316,6 @@
                         <button onclick="startGame()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg shadow-lg transition duration-200 text-xl tracking-wider">
                             START RACE
                         </button>
-                        <button onclick="showUpgradesMenu()" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200">
-                            UPGRADES
-                        </button>
                         <button onclick="showHowToPlay()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition duration-200">
                             HOW TO PLAY
                         </button>
@@ -1370,65 +1323,6 @@
                             SETTINGS (Keybinds)
                         </button>
                         </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    /** Shows the upgrades shop modal. (NEW) */
-    window.showUpgradesMenu = function() {
-        let upgradesHtml = '';
-        const currentScore = Math.floor(gameState.score);
-        
-        for (const key in gameState.upgrades) {
-            const up = gameState.upgrades[key];
-            const isAffordable = currentScore >= up.cost;
-            
-            const costClass = isAffordable ? 'text-green-400' : 'text-red-400';
-            const buttonClass = isAffordable ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 cursor-not-allowed';
-            const buttonAction = isAffordable ? `buyUpgrade('${key}')` : 'void(0)';
-            
-            // Calculate the actual current base value (before level scaling)
-            const baseValue = key === 'maxSpeed' ? BASE_MAX_PLAYER_SPEED : BASE_ACCELERATION_RATE;
-            const currentValue = baseValue * Math.pow(up.multiplier, up.level);
-            const nextValue = baseValue * Math.pow(up.multiplier, up.level + 1);
-            
-            upgradesHtml += `
-                <div class="p-4 bg-gray-700 rounded-xl shadow-lg border border-gray-600">
-                    <h4 class="text-xl font-bold text-yellow-300">${up.name} (Lvl ${up.level})</h4>
-                    <p class="text-sm text-gray-400 mb-2">${up.description}</p>
-                    
-                    <div class="flex justify-between items-center mb-3 text-sm">
-                        <span class="font-semibold text-gray-300">Current Base: </span>
-                        <span class="text-indigo-300">${currentValue.toFixed(1)} Units</span>
-                    </div>
-
-                    <div class="flex justify-between items-center mb-3 text-sm">
-                        <span class="font-semibold text-gray-300">Next Base: </span>
-                        <span class="text-green-300">${nextValue.toFixed(1)} Units</span>
-                    </div>
-
-                    <div class="flex justify-between items-center">
-                        <span class="font-extrabold ${costClass}">Cost: ${Math.ceil(up.cost).toLocaleString()} Score</span>
-                        <button onclick="${buttonAction}" class="text-white font-bold py-2 px-4 rounded transition duration-200 ${buttonClass}">
-                            BUY UPGRADE
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-
-        modalContainerEl.innerHTML = `
-            <div class="modal-overlay">
-                <div class="menu-card rounded-2xl p-8 md:p-12 text-white w-11/12 md:w-1/2 lg:w-1/3">
-                    <h2 class="text-4xl font-extrabold mb-4 text-yellow-400 text-center">UPGRADES SHOP</h2>
-                    <p class="text-lg text-gray-300 mb-6 text-center">Current Score: <span class="font-extrabold text-white">${currentScore.toLocaleString()}</span></p>
-                    
-                    <div class="space-y-4">
-                        ${upgradesHtml}
-                    </div>
-
-                    <button onclick="showMainMenu()" class="mt-8 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
             </div>
         `;
@@ -1451,9 +1345,6 @@
                             </li>
                             <li class="p-3 bg-gray-700 rounded-lg">
                                 <span class="font-bold text-red-300">OBJECTIVE:</span> Avoid traffic. Your score is based on distance traveled at speed.
-                            </li>
-                            <li class="p-3 bg-gray-700 rounded-lg">
-                                <span class="font-bold text-indigo-300">UPGRADES:</span> Use accumulated Score to permanently buy upgrades in the main menu.
                             </li>
                             <li class="p-3 bg-gray-700 rounded-lg">
                                 <span class="font-bold text-indigo-300">PAUSE:</span> Press the <span class="font-mono bg-gray-800 px-2 py-1 rounded">SPACEBAR</span> at any time.
@@ -1537,7 +1428,7 @@
             <div class="modal-overlay">
                 <div class="menu-card bg-red-900 border-2 border-red-500 rounded-xl p-10 text-center text-white shadow-2xl z-50 w-11/12 md:w-1/3">
                     <h2 class="text-5xl font-extrabold mb-4 text-red-300">CRASH! GAME OVER!</h2>
-                    <p class="text-2xl mb-6">Final Score: <span class="text-yellow-400 font-extrabold">${Math.floor(gameState.score).toLocaleString()}</span></p>
+                    <p class="text-2xl mb-6">Final Score: <span class="text-yellow-400 font-extrabold">${Math.floor(gameState.score)}</span></p>
                     <button onclick="showMainMenu()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200">BACK TO MENU</button>
                 </div>
             </div>
@@ -1547,7 +1438,6 @@
         // Hide game UI when game is over
         infoPanelEl.classList.add('hidden');
         controlsInfoEl.classList.add('hidden');
-        pedalsContainerEl.classList.add('hidden');
     }
     
     /** Resets the game state and initializes all objects for a new game. */
@@ -1562,9 +1452,6 @@
             }
         }
         
-        // Load upgrades and apply effects BEFORE setting initial speed
-        loadUpgrades(); 
-
         // Reset state variables
         gameState.score = 0;
         gameState.level = 1;
@@ -1574,8 +1461,11 @@
         gameState.backgroundElements = [];
         gameState.lastTrafficSpawn = 0;
         cleanupWeather(); 
-        
-        // scaleGameSpeed() is called inside applyUpgrades() which is inside loadUpgrades()
+        // Reset traffic grouping array
+        gameState.trafficByLane = []; 
+
+        scaleGameSpeed(); 
+        // Initial speed is IDLE_PLAYER_SPEED, which is now 0.0 (stopped)
         gameState.playerSpeedUnits = IDLE_PLAYER_SPEED; 
         
         // Setup lanes if first run
@@ -1592,17 +1482,20 @@
         gameState.playerCar.currentX = gameState.playerCar.lanePositions[gameState.playerCar.lane];
         scene.add(gameState.playerCar.mesh);
         
-        // Reset camera position to player start
+        // >> START MODIFICATION: Reset camera position to player start
         camera.position.x = gameState.playerCar.currentX;
+        // We also need to reset the Y and Z positions to the default chase cam angle
         camera.position.y = 4;
         camera.position.z = PLAYER_Z + 5;
         
+        // And reset the lookAt target
         const lookAtTarget = new THREE.Vector3(
             gameState.playerCar.currentX,
             2,
             PLAYER_Z - 10
         );
         camera.lookAt(lookAtTarget);
+        // >> END MODIFICATION
 
         // Rebuild static scene elements
         createRoad();
@@ -1638,6 +1531,7 @@
         const deltaTime = clock.getDelta(); 
         
         // 1. Update all game physics and movement
+        // (This now includes camera movement and NPC AI)
         updateMotion(deltaTime);
         
         // 2. Update all UI displays and check for progression
@@ -1693,7 +1587,6 @@
     // Start the game by showing the main menu
     window.onload = function () {
         initThreeJS();
-        loadUpgrades(); // Load upgrades state immediately on load
         showMainMenu(); 
     }
 </script>
